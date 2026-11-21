@@ -76,12 +76,9 @@ impl Policy {
             ));
         }
         for (&language, &limit) in &config.cognitive_limits {
-            if limit == 0
-                || !Rule::CognitiveComplexity.supports(language)
-                || !config.limits.contains_key(&language)
-            {
+            if limit == 0 || !config.limits.contains_key(&language) {
                 return Err(invalid(
-                    "cognitive_limits requires positive limits for enabled TypeScript or TSX"
+                    "cognitive_limits requires positive limits for languages enabled in limits"
                         .into(),
                 ));
             }
@@ -103,19 +100,18 @@ impl Policy {
         let cyclomatic_limit = self.limits.get(&language).copied()?;
         match rule {
             Rule::CyclomaticComplexity => Some(cyclomatic_limit),
-            Rule::CognitiveComplexity if rule.supports(language) => Some(
+            Rule::CognitiveComplexity => Some(
                 self.cognitive_limits
                     .get(&language)
                     .copied()
                     .unwrap_or(DEFAULT_LIMIT),
             ),
-            Rule::CognitiveComplexity | Rule::SourceDuplication => None,
+            Rule::SourceDuplication => None,
         }
     }
 
     pub fn selects(&self, language: Language) -> bool {
-        self.limits.contains_key(&language)
-            || (self.duplication_minimum.is_some() && Rule::SourceDuplication.supports(language))
+        self.limits.contains_key(&language) || self.duplication_minimum.is_some()
     }
 
     pub fn includes(&self, path: &Path) -> bool {
@@ -238,11 +234,7 @@ impl Baseline {
             score,
         } in baseline.entries
         {
-            if !valid_identity(&identity)
-                || !rule.supports(identity.language)
-                || rule == Rule::SourceDuplication
-                || score == 0
-            {
+            if !valid_identity(&identity) || rule == Rule::SourceDuplication || score == 0 {
                 return Err(invalid(format!(
                     "invalid baseline entry for {:?}",
                     identity.path
@@ -259,10 +251,11 @@ impl Baseline {
         for mut entry in baseline.duplication_entries {
             let [left, right] = &entry.occurrences;
             if left == right
-                || entry.occurrences.iter().any(|identity| {
-                    !valid_identity(identity)
-                        || !Rule::SourceDuplication.supports(identity.language)
-                })
+                || left.language.duplication_family() != right.language.duplication_family()
+                || entry
+                    .occurrences
+                    .iter()
+                    .any(|identity| !valid_identity(identity))
                 || entry.score == 0
                 || entry.score != entry.tokens.len()
                 || entry.tokens.iter().any(|token| {

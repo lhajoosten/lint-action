@@ -56,7 +56,7 @@ function another() { prepare(item); send(item); }
         self.write("different.ts", 'function different() { prepare(other); send("item"); }')
         self.write("ignored.py", "def copy(): pass")
         report, raw = self.invoke(0)
-        self.assertEqual(report["files_scanned"], 3)
+        self.assertEqual(report["files_scanned"], 4)
         self.assertEqual(report["diagnostics"], [])
         self.assertEqual(len(report["findings"]), 3)
         self.assertTrue(all(
@@ -92,6 +92,44 @@ function another() { prepare(item); send(item); }
             self.write("second.tsx", f"function second() {{ {expression.replace(old, new)} }}")
             self.assertEqual(self.invoke(0)[0]["findings"], [])
         self.duplication(minimum=2**32 - 1)
+        self.assertEqual(self.invoke(0)[0]["findings"], [])
+
+    def test_source_duplication_groups_by_language_and_baselines_all_families(self):
+        self.duplication("baseline")
+        samples = {
+            "first.rs": "fn first() { prepare(item); send(item); }",
+            "second.rs": "fn second() { prepare(item); /* harmless */ send(item); }",
+            "first.py": "def first():\n    prepare(item)\n    send(item)\n",
+            "second.pyi": "def second():\n  prepare( item ) # harmless\n  send(item)\n",
+            "only.ts": "function only() { prepare(item); send(item); }",
+        }
+        for path, source in samples.items():
+            self.write(path, source)
+        self.write(BASELINE, '{"scoring_version":1,"entries":[]}')
+        expected = [(["first.py", "second.pyi"], 10), (["first.rs", "second.rs"], 10)]
+        report, _ = self.invoke(1)
+        self.assertEqual([
+            ([part["path"] for part in item["occurrences"]], item["score"])
+            for item in report["findings"]
+        ], expected)
+        self.assertEqual(report["files_scanned"], len(samples))
+        self.assertTrue(all(item["status"] == "blocking" for item in report["findings"]))
+        baseline, raw = self.invoke(0, "baseline")
+        self.assertEqual(len(baseline["duplication_entries"]), 2)
+        self.write(BASELINE, raw.decode())
+        self.write("second.rs", "// unrelated lines\n" + samples["second.rs"])
+        self.write("second.pyi", "\n# unrelated lines\n" + samples["second.pyi"])
+        self.assertEqual([item["status"] for item in self.invoke(0)[0]["findings"]],
+                         ["baselined", "baselined"])
+
+    def test_python_duplication_preserves_suite_boundaries(self):
+        self.duplication(minimum=15)
+        source = "def first():\n    if ready:\n        prepare(item)\n        send(item)\n"
+        self.write("first.py", source)
+        self.write("second.py", source.replace("first", "second"))
+        report, _ = self.invoke(0)
+        self.assertEqual(report["findings"][0]["score"], 16)
+        self.write("second.py", source.replace("first", "second").replace("        send", "    send"))
         self.assertEqual(self.invoke(0)[0]["findings"], [])
 
     def test_source_duplication_baseline_is_pair_and_content_specific(self):
@@ -308,6 +346,69 @@ function host(a: boolean) {
         ]
         self.assertEqual([(p["construct"], p["points"]) for p in finding["contributions"]], expected)
         self.assertEqual(finding["score"], 24)
+
+    def test_rust_and_python_cognitive_complexity_and_default_limits(self):
+        self.write("sample.rs", """fn outer() {
+    if ready() {
+        for value in values() {
+            if valid(value) && clean(value) && visible(value) || forced() {
+                use_it(value);
+            }
+        }
+    } else if waiting() {
+        while pending() { work(); }
+    } else {
+        match state() {
+            Some(value) if ready() => work(),
+            _ => {}
+        }
+    }
+    let Some(value) = input() else { return; };
+    let nested = || { if ready() { while waiting() { work(); } } };
+    work()?.finish();
+}
+""")
+        self.write("sample.py", """def outer():
+    if ready():
+        for item in source():
+            if (allowed(item) and clean(item)) and valid(item) or force():
+                work(item)
+    elif waiting():
+        while pending():
+            work()
+    else:
+        match state():
+            case item if allowed(item):
+                work(item)
+    try:
+        work()
+    except ValueError:
+        if ready():
+            work()
+    def nested():
+        if ready():
+            while waiting():
+                work()
+    return [choose(x) if allowed(x) else other(x) for x in source() if valid(x)]
+""")
+        self.write(POLICY, '{"mode":"report-only"}')
+        report, _ = self.invoke(0)
+        self.assertEqual([(item["language"], item["score"], item["limit"])
+                          for item in report["findings"] if item["rule"] == "cognitive-complexity"],
+                         [("python", 24, 12), ("rust", 19, 12)])
+        self.config("baseline", limits={"rust": 100, "python": 100},
+                    cognitive_limits={"rust": 1, "python": 1})
+        baseline, raw = self.invoke(0, "baseline")
+        self.assertEqual([item["rule"] for item in baseline["entries"]], ["cognitive-complexity"] * 4)
+        self.write(BASELINE, raw.decode())
+        report, _ = self.invoke(0)
+        self.assertEqual([(item["name"], item["score"], item["status"]) for item in report["findings"]],
+                         [("outer", 24, "baselined"), ("nested", 3, "baselined"),
+                          ("outer", 19, "baselined"), ("nested", 3, "baselined")])
+        rust = report["findings"][2]
+        self.assertEqual([(item["construct"], item["points"], item["range"]["start"]["line"])
+                          for item in rust["contributions"] if item["construct"] in {"guard", "error propagation"}],
+                         [("guard", 3, 12), ("error propagation", 1, 18)])
 
     def test_both_defaults_are_twelve_and_overrides_are_independent(self):
         branches = "if (x) work();"

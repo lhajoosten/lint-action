@@ -3,7 +3,7 @@ use tree_sitter::{Language as Grammar, Node};
 
 pub const ANONYMOUS: &str = "<anonymous>";
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
     Rust,
@@ -38,6 +38,20 @@ impl Language {
             "tsx" => Some(Self::Tsx),
             "py" | "pyi" => Some(Self::Python),
             _ => None,
+        }
+    }
+
+    pub fn duplication_family(self) -> Self {
+        match self {
+            Self::Tsx => Self::Typescript,
+            language => language,
+        }
+    }
+
+    pub fn statement_block(self) -> &'static str {
+        match self {
+            Self::Rust | Self::Python => "block",
+            Self::Typescript | Self::Tsx => "statement_block",
         }
     }
 

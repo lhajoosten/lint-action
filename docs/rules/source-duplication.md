@@ -1,6 +1,6 @@
 # Source duplication
 
-The `source-duplication` rule reports repeated syntax token sequences in TypeScript and TSX. Enable it by adding a `duplication` object to the policy. An empty object uses the default minimum of 50 tokens. Set `minimum_tokens` to a positive integer to override it. A match at the minimum qualifies.
+The `source-duplication` rule reports repeated syntax token sequences in Rust, Python, TypeScript, and TSX. Enable it by adding a `duplication` object to the policy. An empty object uses the default minimum of 50 tokens. Set `minimum_tokens` to a positive integer to override it. A match at the minimum qualifies.
 
 ```json
 {
@@ -12,13 +12,21 @@ The `source-duplication` rule reports repeated syntax token sequences in TypeScr
 }
 ```
 
-This policy runs duplication alone. To run it alongside complexity, supply the desired complexity limits or omit `limits` for the default complexity policy. Duplication selects `.ts`, `.mts`, `.cts`, and `.tsx` independently of the complexity limits and obeys the same path filters. The Action compares the full selected checkout, so a new file can match unchanged source. An explicit CLI path selection limits both sides of a comparison.
+This policy runs duplication alone. To run it alongside complexity, supply the desired complexity limits or omit `limits` for the default complexity policy. Duplication selects `.rs`, `.py`, `.pyi`, `.ts`, `.mts`, `.cts`, and `.tsx` independently of the complexity limits and obeys the same path filters. The Action compares the full selected checkout, so a new file can match unchanged source. An explicit CLI path selection limits both sides of a comparison.
 
 ## Matching and locations
 
-The rule searches inside brace-delimited TypeScript and TSX statement blocks. These include function, method, block-bodied arrow, control-flow, namespace, and standalone blocks. An outermost statement block is searched once, including any nested syntax inside it. Its opening and closing braces are excluded. Module-level statement lists, class bodies, and expression-bodied arrows do not add block boundaries of their own. Identical syntax can match across the two grammars.
+The rule searches within each language family. TypeScript and TSX share a family, as do Python source files and stubs. Rust forms its own family.
 
-The analyzer compares contiguous Tree-sitter terminal tokens. It ignores comments and whitespace between tokens, and matches identifiers, literal spellings, punctuation, and operators exactly. Whitespace inside a literal or JSX text is part of that token. Compare these bodies at a minimum of 10 tokens.
+| Family | Eligible regions |
+| --- | --- |
+| TypeScript and TSX | Brace-delimited statement blocks, including functions, methods, block-bodied arrows, control flow, namespaces, and standalone blocks |
+| Rust | Brace-delimited expression blocks, including functions, block-bodied closures, and control flow |
+| Python | Statement suites, including functions, classes, and control flow |
+
+The matcher searches each outermost eligible block once, including nested syntax. It excludes the outer braces in Rust and TypeScript. Module-level statement lists and expression-bodied callables add no regions of their own. Python scores statement boundaries and nested suite boundaries as syntax tokens, so a change in indentation style preserves a match while moving a statement out of a suite changes it.
+
+The analyzer ignores comments and whitespace between tokens. It matches identifiers, literal spellings, punctuation, and operators exactly. Whitespace inside a literal or JSX text is part of that token. Compare these bodies at a minimum of 10 tokens.
 
 ```ts
 function original() {

@@ -14,7 +14,7 @@ pub struct Analysis {
 
 struct Frame {
     cyclomatic_index: usize,
-    cognitive_index: Option<usize>,
+    cognitive_index: usize,
     depth: u32,
 }
 
@@ -35,9 +35,12 @@ pub fn analyze(
         .ok_or_else(|| parser_error("Tree-sitter returned no syntax tree"))?;
 
     let mut result = Analysis::default();
-    let mut duplicate_source = duplication_budget.map(|_| duplication::Source::new(path));
+    let mut duplicate_source = duplication_budget.map(|_| duplication::Source::new(path, language));
+    let over_budget = |collector: &duplication::Source| {
+        duplication_budget
+            .is_some_and(|(tokens, bytes)| collector.tokens > tokens || collector.bytes > bytes)
+    };
     let mut scope = Vec::<Scope>::new();
-    let cognitive = Rule::CognitiveComplexity.supports(language);
     let mut active = Vec::<Frame>::new();
     let mut entries = Vec::new();
     let mut cursor = tree.walk();
@@ -70,11 +73,11 @@ pub fn analyze(
             if is_callable {
                 active.push(Frame {
                     cyclomatic_index: result.callables.len(),
-                    cognitive_index: cognitive.then_some(result.callables.len() + 1),
+                    cognitive_index: result.callables.len() + 1,
                     depth: 0,
                 });
                 let rules = [Rule::CyclomaticComplexity, Rule::CognitiveComplexity];
-                for rule in rules.into_iter().filter(|rule| rule.supports(language)) {
+                for rule in rules {
                     result.callables.push(Callable {
                         rule,
                         identity: identity.clone(),
@@ -90,22 +93,19 @@ pub fn analyze(
         if let Some(frame) = active.last_mut() {
             result.callables[frame.cyclomatic_index].score +=
                 u64::from(decision_points(language, node));
-            if let Some(index) = frame.cognitive_index {
-                nested = !is_callable && cognitive::enters_nested_flow(node);
-                frame.depth += u32::from(nested);
-                let metric = &mut result.callables[index];
-                metric.score += u64::from(cognitive::score(
-                    node,
-                    frame.depth,
-                    &mut metric.contributions,
-                ));
-            }
+            nested = !is_callable && cognitive::enters_nested_flow(node);
+            frame.depth += u32::from(nested);
+            let metric = &mut result.callables[frame.cognitive_index];
+            metric.score += u64::from(cognitive::score(
+                node,
+                frame.depth,
+                &mut metric.contributions,
+            ));
         }
 
         if let Some(collector) = duplicate_source.as_mut() {
-            collector.enter(node, source, language, &scope);
-            let (tokens, bytes) = duplication_budget.expect("collector has a budget");
-            if collector.tokens > tokens || collector.bytes > bytes {
+            collector.enter(node, source, &scope);
+            if over_budget(collector) {
                 result.diagnostics.push(duplication::resource_limit());
                 duplicate_source = None;
             }
@@ -135,6 +135,10 @@ pub fn analyze(
                 break;
             }
             if !cursor.goto_parent() {
+                if duplicate_source.as_ref().is_some_and(over_budget) {
+                    result.diagnostics.push(duplication::resource_limit());
+                    duplicate_source = None;
+                }
                 if result
                     .diagnostics
                     .iter()

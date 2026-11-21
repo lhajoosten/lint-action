@@ -1,6 +1,8 @@
 # Cognitive complexity
 
-Rule ID `cognitive-complexity`, scoring version 1. The rule covers TypeScript and TSX. Each callable starts at zero and owns its contributions, including those inside nested control flow. A nested callable starts fresh and has its own report.
+Rule ID `cognitive-complexity`, scoring version 1. The rule covers Rust, Python, TypeScript, and TSX. The default limit is 12 for every enabled language. Each callable starts at zero and owns its contributions, including those inside nested control flow. A nested callable starts fresh and has its own report.
+
+## TypeScript and TSX
 
 | Construct | Points |
 | --- | --- |
@@ -14,7 +16,19 @@ Logical runs follow the written order of `&&`, `||`, and `??`. Parentheses aroun
 
 Case labels, optional chaining, default values, logical assignments, ordinary returns, throws, and unlabeled jumps add zero. The syntax-only analyzer also leaves recursion unscored.
 
-## Worked scores
+## Rust
+
+`if`, `for`, `while`, `loop`, `match`, guarded match patterns, and `let … else` add one point plus their enclosing control-flow depth. Branch and loop bodies add a nesting level, including the fallback block of `let … else`. Match arms share the match body's depth. `else if`, `else`, labeled jumps, and error propagation with `?` each add one point. Logical expressions and let chains add one point per run of `&&` or `||`.
+
+For example, an `if` inside a `for` adds 2 points. The enclosing loop adds 1. A guard in a top-level `match` also adds 2 points, on top of the match's 1 point.
+
+## Python
+
+`if`, `for` (including `async for`), `while`, `match`, case guards, `except` (including `except*`), conditional expressions, and comprehension `for` and `if` clauses each add one point plus their enclosing control-flow depth. `elif` and `else` each add one point. Branch and loop bodies, exception handler bodies, conditional expression branches, and comprehension result expressions add a nesting level. Cases share the match body's depth. `try`, `finally`, and `with` add no nesting on their own. Logical expressions add one point per run of `and` or `or`.
+
+For example, `[item for item in items if valid(item)]` adds 2 points at the top level of a callable. A conditional expression used as its result adds 2 more.
+
+## TypeScript worked scores
 
 | Function shape | Cyclomatic | Cognitive |
 | --- | ---: | ---: |
@@ -24,4 +38,4 @@ Case labels, optional chaining, default values, logical assignments, ordinary re
 
 The JSON finding includes the construct, range, points, and nesting increment for every contribution. The Action shows up to the three largest contributions in the annotation.
 
-The rule follows Sonar's nesting and flow-break model. Its TypeScript contract counts all three documented short-circuit operators, scores nested callables independently, and requires no type or call-graph resolution. [Sonar Cognitive Complexity white paper](https://www.sonarsource.com/docs/CognitiveComplexity.pdf)
+The rule follows Sonar's nesting and flow-break model. The contracts score nested callables independently and use syntax alone across all supported languages. [Sonar Cognitive Complexity white paper](https://www.sonarsource.com/docs/CognitiveComplexity.pdf)
