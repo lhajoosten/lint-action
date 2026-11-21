@@ -129,7 +129,7 @@ jobs:
        (github.event.pull_request.merged == true &&
         vars.RELEASE_APP_ID != '' &&
         vars.RELEASE_BOT_USER_ID != '' &&
-        vars.RELEASE_LOG_WRITE_ENABLED == 'true'))
+        vars.RELEASE_LOG_WRITE_ENABLED != 'false'))
     uses: lhajoosten/rolling-release/.github/workflows/rolling-release.yml@21662200936919c1df83f9d3ce8fccee42fa3dc4
     with:
       tool-sha: "21662200936919c1df83f9d3ce8fccee42fa3dc4"
