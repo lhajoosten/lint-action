@@ -22,7 +22,9 @@ def build(workspace, binary):
     git(passing, "init", "-q")
     git(passing, "config", "user.name", "Fixture")
     git(passing, "config", "user.email", "fixture@example.invalid")
-    (passing / CONFIG).write_text('{"mode":"baseline","limits":{"typescript":1}}\n')
+    (passing / CONFIG).write_text(
+        '{"mode":"baseline","limits":{"typescript":1},"cognitive_limits":{"typescript":1}}\n'
+    )
     (passing / "legacy.ts").write_text("export const old = () => true ? 1 : 0;\n")
     (passing / BASELINE).write_bytes(subprocess.check_output(
         [binary, "baseline", "--root", passing]
@@ -32,6 +34,7 @@ def build(workspace, binary):
     revision = git(passing, "rev-parse", "HEAD")
     shutil.copytree(passing, failing)
     (failing / UNUSUAL).write_text("export const fresh = () => false || true;\n")
+    (failing / "nested.ts").write_text("function nested() { if (a) { if (b) work(); } }\n")
     (failing / BASELINE).write_bytes(subprocess.check_output(
         [binary, "baseline", "--root", failing]
     ))
@@ -43,11 +46,16 @@ def build(workspace, binary):
 def verify(passing, failing):
     reports = [json.loads(path.read_bytes()) for path in (passing, failing)]
     assert list(map(lambda report: report["mode"], reports)) == ["baseline", "baseline"]
-    assert [(item["path"], item["status"]) for item in reports[0]["findings"]] == [
-        ("legacy.ts", "baselined"),
-    ]
-    assert [(item["path"], item["status"]) for item in reports[1]["findings"]] == [
-        ("legacy.ts", "baselined"), (UNUSUAL, "blocking"),
+    def findings(report):
+        return [(item["path"], item["rule"], item["status"]) for item in report["findings"]]
+
+    legacy = ("legacy.ts", "cyclomatic-complexity", "baselined")
+    assert findings(reports[0]) == [legacy]
+    assert findings(reports[1]) == [
+        legacy,
+        ("nested.ts", "cyclomatic-complexity", "blocking"),
+        ("nested.ts", "cognitive-complexity", "blocking"),
+        (UNUSUAL, "cyclomatic-complexity", "blocking"),
     ]
 
 

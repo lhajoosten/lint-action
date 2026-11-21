@@ -1,6 +1,6 @@
 use crate::analyzer::{Analysis, analyze};
 use crate::grammar::Language;
-use crate::model::{Diagnostic, ErrorKind};
+use crate::model::{Diagnostic, ErrorKind, Rule};
 use crate::policy::{MAX_FILE_BYTES, Policy, bounded_read, normal_relative_path, slash_path};
 use std::collections::BTreeSet;
 use std::fs;
@@ -145,7 +145,7 @@ fn scan_file(
     let Some(language) = Language::from_path(path) else {
         return Ok(None);
     };
-    if policy.limit(language).is_none()
+    if policy.limit(language, Rule::CyclomaticComplexity).is_none()
         || !policy.includes(path)
         || path
             .ancestors()

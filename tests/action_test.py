@@ -46,6 +46,7 @@ class ActionTests(unittest.TestCase):
                         "::fresh has cyclomatic complexity 2 (limit 1, blocking)",
                         process.stdout,
                     )
+                    self.assertIn("nested has cognitive complexity 3 (limit 1, blocking)", process.stdout)
                 else:
                     self.assertIn("::warning title=lint-action quality gate,file=action-fixture-pass/legacy.ts",
                                   process.stdout)
@@ -53,7 +54,7 @@ class ActionTests(unittest.TestCase):
             summary = Path(env["GITHUB_STEP_SUMMARY"]).read_text()
             self.assertIn("Outcome: **passed**", summary)
             self.assertIn("Outcome: **violations**", summary)
-            self.assertIn("Baselined: 1 · Blocking: 1", summary)
+            self.assertIn("Baselined: 1 · Blocking: 3", summary)
 
             failing = workspace / env["LINT_ACTION_REPOSITORY"]
             candidate_policy = failing / CONFIG
@@ -80,7 +81,9 @@ class ActionTests(unittest.TestCase):
             # An explicit trusted directory may be used to stage initial rollout.
             trusted = Path(directory) / "trusted"
             trusted.mkdir()
-            (trusted / CONFIG).write_text('{"mode":"report-only","limits":{"typescript":1}}')
+            (trusted / CONFIG).write_text(
+                '{"mode":"report-only","limits":{"typescript":1},"cognitive_limits":{"typescript":1}}'
+            )
             env["LINT_ACTION_POLICY_DIRECTORY"] = str(trusted)
             process = subprocess.run(
                 [sys.executable, "-I", PROJECT / "action/run.py", BIN],
@@ -89,6 +92,8 @@ class ActionTests(unittest.TestCase):
             self.assertEqual(process.returncode, 0, process.stdout)
             output = Path(Path(env["GITHUB_OUTPUT"]).read_text().splitlines()[-1][7:])
             self.assertEqual(json.loads(output.read_bytes())["mode"], "report-only")
+            self.assertIn("nested has cognitive complexity 3 (limit 1, reported)", process.stdout)
+            self.assertIn("Largest contributions: +2 if at line 1", process.stdout)
 
             env["LINT_ACTION_POLICY_DIRECTORY"] = str(failing)
             process = subprocess.run(

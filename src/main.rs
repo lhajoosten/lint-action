@@ -1,4 +1,5 @@
 mod analyzer;
+mod cognitive;
 mod grammar;
 mod model;
 mod policy;
@@ -6,7 +7,7 @@ mod scan;
 
 use crate::analyzer::Analysis;
 use crate::grammar::ANONYMOUS;
-use crate::model::{Callable, Diagnostic, Identity, RULE, SCORING_VERSION};
+use crate::model::{Callable, Diagnostic, Identity, SCORING_VERSION};
 use crate::policy::{BASELINE_FILE, Baseline, BaselineScores, CONFIG_FILE, Mode, Policy};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
@@ -98,7 +99,6 @@ enum Status {
 
 #[derive(Serialize)]
 struct Finding {
-    rule: &'static str,
     #[serde(flatten)]
     callable: Callable,
     limit: u32,
@@ -181,18 +181,19 @@ fn scan(
         scope_counts,
     } = scan.analysis;
     report.diagnostics = diagnostics;
-    for callable in callables {
+    for mut callable in callables {
         let limit = policy
-            .limit(callable.identity.language)
+            .limit(callable.identity.language, callable.rule)
             .expect("scanned language is enabled");
-        if callable.score <= limit {
+        if callable.score <= u64::from(limit) {
             continue;
         }
         let status = match policy.mode {
             Mode::ReportOnly => Status::Reported,
             Mode::Baseline
                 if baseline
-                    .get(&callable.identity)
+                    .get(&callable.rule)
+                    .and_then(|scores| scores.get(&callable.identity))
                     .and_then(|&score| score)
                     .is_some_and(|score| score >= callable.score)
                     && unique(&callable.identity, &scope_counts) =>
@@ -201,8 +202,10 @@ fn scan(
             }
             Mode::Strict | Mode::Baseline => Status::Blocking,
         };
+        callable
+            .contributions
+            .sort_by_key(|part| (part.range.start.line, part.range.start.column));
         report.findings.push(Finding {
-            rule: RULE,
             callable,
             limit,
             status,
@@ -213,11 +216,13 @@ fn scan(
             &left.callable.identity.path,
             left.callable.range.start.line,
             left.callable.range.start.column,
+            left.callable.rule,
         )
             .cmp(&(
                 &right.callable.identity.path,
                 right.callable.range.start.line,
                 right.callable.range.start.column,
+                right.callable.rule,
             ))
     });
     Ok(())
@@ -245,8 +250,8 @@ fn generate(
     Ok(Some(Baseline::generate(callables.iter().filter(
         |callable| {
             policy
-                .limit(callable.identity.language)
-                .is_some_and(|limit| callable.score > limit)
+                .limit(callable.identity.language, callable.rule)
+                .is_some_and(|limit| callable.score > u64::from(limit))
                 && unique(&callable.identity, &scope_counts)
         },
     ))))

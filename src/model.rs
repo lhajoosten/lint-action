@@ -1,8 +1,24 @@
 use crate::grammar::{Language, Scope};
 use serde::{Deserialize, Serialize};
 
-pub const RULE: &str = "cyclomatic-complexity";
 pub const SCORING_VERSION: u32 = 1;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Rule {
+    #[default]
+    CyclomaticComplexity,
+    CognitiveComplexity,
+}
+
+impl Rule {
+    pub fn supports(self, language: Language) -> bool {
+        match self {
+            Self::CyclomaticComplexity => true,
+            Self::CognitiveComplexity => matches!(language, Language::Typescript | Language::Tsx),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct Position {
@@ -39,11 +55,22 @@ pub struct Identity {
 
 #[derive(Serialize)]
 pub struct Callable {
+    pub rule: Rule,
     #[serde(flatten)]
     pub identity: Identity,
     pub name: String,
     pub range: Range,
-    pub score: u32,
+    pub score: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub contributions: Vec<Contribution>,
+}
+
+#[derive(Serialize)]
+pub struct Contribution {
+    pub construct: &'static str,
+    pub points: u32,
+    pub nesting: u32,
+    pub range: Range,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
