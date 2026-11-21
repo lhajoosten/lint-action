@@ -1,0 +1,244 @@
+"""Black-box checks for the packaged lint-action executable."""
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+HERE = Path(__file__).resolve().parent
+BIN = Path(os.environ["LINT_ACTION_BIN"]).resolve()
+POLICY = ".lint-action.json"
+BASELINE = ".lint-action-baseline.json"
+
+
+class CliTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.config()
+
+    def write(self, path, content):
+        (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / path).write_text(content, encoding="utf-8")
+
+    def config(self, mode="report-only", limits=None, **options):
+        self.write(POLICY, json.dumps({
+            "mode": mode,
+            "limits": limits if limits is not None else dict(rust=1, typescript=1, tsx=1, python=1),
+            **options,
+        }))
+
+    def invoke(self, code, command="scan", *arguments):
+        result = subprocess.run(
+            [BIN, command, "--root", self.root, *arguments], capture_output=True, check=False
+        )
+        self.assertEqual(result.returncode, code, (result.stdout, result.stderr))
+        stream = result.stderr if command == "baseline" and code else result.stdout
+        return json.loads(stream), result.stdout
+
+    def test_mixed_fixtures_match_hand_scored_contract(self):
+        shutil.copytree(HERE / "fixtures/mixed", self.root, dirs_exist_ok=True)
+        report, raw = self.invoke(0)
+        self.assertEqual((report["format_version"], report["scoring_version"]), (1, 1))
+        self.assertEqual((report["files_scanned"], report["files_skipped"]), (4, 2))
+        self.assertEqual(report["diagnostics"], [])
+        expected = [
+            ("flow.py", "sample", 8, (2, 5), (11, 22)),
+            ("flow.py", "nested", 2, (3, 18), (3, 41)),
+            ("flow.rs", "sample", 8, (1, 1), (12, 2)),
+            ("flow.rs", "nested", 2, (2, 18), (2, 42)),
+            ("flow.ts", "sample", 5, (1, 1), (7, 2)),
+            ("flow.ts", "nested", 2, (2, 20), (2, 35)),
+            ("view.tsx", "View", 3, (1, 21), (3, 2)),
+        ]
+
+        def point(item, edge):
+            location = item["range"][edge]
+            return location["line"], location["column"]
+
+        self.assertEqual([
+            (item["path"], item["name"], item["score"], point(item, "start"), point(item, "end"))
+            for item in report["findings"]
+        ], expected)
+        for item in report["findings"]:
+            self.assertEqual((item["rule"], item["status"], item["limit"]),
+                             ("cyclomatic-complexity", "reported", 1))
+        self.assertEqual(report["findings"][1]["scope"][-2]["name"], "sample")
+        paths = [path.name for path in self.root.iterdir()]
+        self.assertEqual(self.invoke(0, "scan", "--", *reversed(paths), "flow.ts")[1], raw)
+
+    def test_additional_grammar_constructs(self):
+        self.write("choices.rs", """impl Item {
+    fn choices(&self, x: Option<bool>) {
+        let Some(y) = x else { return; };
+        while let Some(a) = x && a { break; }
+        for _ in [1] { continue; }
+        loop { break; }
+        if y || !y {} else if y {}
+        ignore!(if a || b {});
+    }
+}
+""")
+        self.write("choices.ts", """class Example {
+    *choices({a = true} = {}) {
+        for (const item of []) {}
+        for (;;) { break; }
+        while (a) { break; }
+        do {} while (a);
+        try { a &&= a; a ||= a; a ??= false; }
+        catch { return this?.call?.()[0]?.[1]; }
+    }
+}
+""")
+        self.write("choices.py", """async def choices(items):
+    async for x in items:
+        if x:
+            continue
+        elif not x:
+            break
+    while items:
+        try:
+            raise ExceptionGroup("x", [])
+        except* ValueError:
+            pass
+    return (a for a in items for b in items if a or b)
+""")
+        self.write("unicode.ts", """const é = "if && ??"; consume(() => false || true); // if
+""")
+        report, _ = self.invoke(0)
+        self.assertEqual(
+            [(item["name"], item["score"]) for item in report["findings"]],
+            [("choices", 10), ("choices", 9), ("choices", 14), ("<anonymous>", 2)],
+        )
+        anonymous = report["findings"][-1]
+        self.assertEqual(anonymous["range"]["start"]["column"],
+                         len('const é = "if && ??"; consume('.encode("utf-8")) + 1)
+
+    def test_strict_threshold_and_selection(self):
+        self.write("src/choices.ts", "const choose = (x: boolean) => x ? 1 : 0;")
+        self.write("src/also.tsx", "this is invalid TSX")
+        self.write("src/skipped/choices.ts", "function {")
+        self.write("elsewhere.ts", "function {")
+        self.config("strict", {"typescript": 2}, include=["src/**"], exclude=["src/skipped/**"])
+        report, _ = self.invoke(0)
+        self.assertEqual((report["files_scanned"], report["findings"]), (1, []))
+        self.assertEqual(self.invoke(2, "scan", "src/skipped/choices.ts")[0]["diagnostics"][0]["kind"],
+                         "empty_scan")
+        self.config("strict", {"typescript": 1}, include=["src/**"], exclude=["src/skipped/**"])
+        report, _ = self.invoke(1)
+        self.assertEqual(report["findings"][0]["status"], "blocking")
+
+    def test_analysis_failures_override_report_and_gate_modes(self):
+        for limits in ({}, {"typescript": 0}, {"javascript": 20}):
+            self.config(limits=limits)
+            self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "invalid_config")
+        self.config(include=["../**"])
+        self.assertEqual(self.invoke(2, "validate")[0]["diagnostics"][0]["kind"], "invalid_config")
+        self.config(include=["["])
+        self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "invalid_config")
+        self.config()
+        self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "empty_scan")
+        self.assertEqual(self.invoke(2, "scan", "../escape.ts")[0]["diagnostics"][0]["kind"],
+                         "invalid_path")
+        self.assertEqual(self.invoke(2, "scan", "absent.ts")[0]["diagnostics"][0]["kind"],
+                         "unreadable_source")
+        self.write("good.ts", "function f(x: boolean) { return x ? 1 : 0; }")
+        self.write("broken.ts", "function f() { return 0;")
+        self.write("syntax.py", "def :\n\tclass")
+        (self.root / "encoding.ts").write_bytes(b"\xff")
+        with (self.root / "large.ts").open("wb") as stream:
+            stream.truncate(4 * 1024 * 1024 + 1)
+        for mode in ("report-only", "strict"):
+            self.config(mode)
+            report, _ = self.invoke(2)
+            kinds = {(item["path"], item["kind"]) for item in report["diagnostics"]}
+            self.assertEqual(kinds, {
+                ("broken.ts", "parse_error"), ("syntax.py", "parse_error"),
+                ("encoding.ts", "invalid_encoding"), ("large.ts", "source_too_large"),
+            })
+            self.assertTrue(any("expected" in item["message"] for item in report["diagnostics"]))
+            self.assertEqual([item["name"] for item in report["findings"]], ["f"])
+        self.invoke(2, "baseline")
+
+    def test_regular_files_and_symlinks(self):
+        self.write("real/ready.py", "def ready(): return True\n")
+        (self.root / "link").symlink_to(self.root / "real", target_is_directory=True)
+        (self.root / "link.py").symlink_to(self.root / "real/ready.py")
+        report, _ = self.invoke(0)
+        self.assertEqual(report["files_scanned"], 1)
+        self.assertEqual(self.invoke(2, "scan", "link/ready.py")[0]["diagnostics"][0]["kind"],
+                         "invalid_path")
+        if os.geteuid() != 0:
+            self.write("private.py", "pass")
+            (self.root / "private.py").chmod(0)
+            self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "unreadable_source")
+
+    def test_baseline_and_candidate_identity(self):
+        original = "def f(x):\n    return 1 if x and x > 2 else 0\n"
+        self.write("debt.py", original)
+        self.config("baseline", {"python": 1})
+        self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "invalid_baseline")
+        baseline, _ = self.invoke(0, "baseline")
+        self.assertEqual(baseline["entries"], [{
+            "identity": {"path": "debt.py", "language": "python",
+                         "scope": [{"kind": "function", "name": "f"}]},
+            "score": 3,
+        }])
+        self.write(BASELINE, json.dumps(baseline))
+        self.invoke(0, "validate")
+
+        cases = [
+            ("\n" + original, 0, [(3, "baselined")]),
+            (original.replace(" and x > 2", ""), 0, [(2, "baselined")]),
+            (original.replace(" and x > 2", " and x > 2 or x"), 1, [(4, "blocking")]),
+            (original + original.replace("def f", "def g"), 1,
+             [(3, "baselined"), (3, "blocking")]),
+            (original + "def f(x): return x\n", 1, [(3, "blocking")]),
+        ]
+        for source, code, expected in cases:
+            self.write("debt.py", source)
+            report, _ = self.invoke(code)
+            self.assertEqual([(item["score"], item["status"]) for item in report["findings"]], expected)
+        self.assertEqual(self.invoke(0, "baseline")[0]["entries"], [])
+
+        self.write("debt.py", original)
+        baseline["entries"] *= 2
+        self.write(BASELINE, json.dumps(baseline))
+        self.assertEqual(self.invoke(1)[0]["findings"][0]["status"], "blocking")
+        baseline["entries"].pop()
+        self.write(BASELINE, json.dumps(baseline))
+        (self.root / "debt.py").rename(self.root / "moved.py")
+        self.assertEqual(self.invoke(1)[0]["findings"][0]["status"], "blocking")
+        baseline["scoring_version"] += 1
+        self.write(BASELINE, json.dumps(baseline))
+        self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "invalid_baseline")
+
+    def test_unique_returned_callable_can_be_baselined(self):
+        self.config("baseline", {"typescript": 1})
+        self.write("factory.ts", "function build() { return () => a || b; }")
+        baseline, _ = self.invoke(0, "baseline")
+        self.assertEqual(baseline["entries"][0]["identity"]["scope"], [
+            {"kind": "function", "name": "build"}, {"kind": "arrow", "name": "<return>"},
+        ])
+        self.write(BASELINE, json.dumps(baseline))
+        self.assertEqual(self.invoke(0)[0]["findings"][0]["status"], "baselined")
+        self.write("factory.ts", "function build() { if (c) return () => a || b; return () => c; }")
+        findings = self.invoke(1)[0]["findings"]
+        self.assertEqual([(item["name"], item["status"]) for item in findings],
+                         [("build", "blocking"), ("<return>", "blocking")])
+
+    def test_anonymous_callables_have_no_unsafe_waiver(self):
+        self.config("baseline", {"typescript": 1})
+        self.write("callback.ts", "consume(() => a || b);")
+        baseline, _ = self.invoke(0, "baseline")
+        self.assertEqual(baseline["entries"], [])
+        self.write(BASELINE, json.dumps(baseline))
+        self.assertEqual(self.invoke(1)[0]["findings"][0]["status"], "blocking")
+
+
+if __name__ == "__main__":
+    unittest.main()

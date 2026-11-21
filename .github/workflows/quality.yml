@@ -1,0 +1,57 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify the packaged CLI
+        shell: bash
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
+          cargo +1.88.0 fmt --check
+          cargo +1.88.0 clippy --locked --all-targets -- -D warnings
+          cargo +1.88.0 package --locked
+          package_version=$(cargo +1.88.0 metadata --locked --no-deps --format-version 1 |
+            python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')
+          package_dir="$PWD/target/package/lint-action-$package_version"
+          cargo +1.88.0 build --locked --release --manifest-path "$package_dir/Cargo.toml"
+          export LINT_ACTION_BIN="$package_dir/target/release/lint-action"
+          python3 tests/cli.py
+          python3 tests/action_test.py
+          revision=$(python3 tests/action_fixture.py build "$GITHUB_WORKSPACE" "$LINT_ACTION_BIN")
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+        id: prepare
+      - name: Accept unchanged legacy debt
+        id: passing
+        uses: ./
+        with:
+          repository: action-fixture-pass
+          policy-ref: ${{ steps.prepare.outputs.revision }}
+      - name: Reject a new violation despite the candidate baseline
+        id: failing
+        uses: ./
+        continue-on-error: true
+        with:
+          repository: action-fixture-fail
+          policy-ref: ${{ steps.prepare.outputs.revision }}
+      - name: Verify Action outcomes and reports
+        shell: bash
+        env:
+          FAILING_OUTCOME: ${{ steps.failing.outcome }}
+          PASSING_REPORT: ${{ steps.passing.outputs.report }}
+          FAILING_REPORT: ${{ steps.failing.outputs.report }}
+        run: |
+          test "$FAILING_OUTCOME" = failure
+          python3 tests/action_fixture.py verify "$PASSING_REPORT" "$FAILING_REPORT"

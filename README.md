@@ -1,2 +1,94 @@
 # lint-action
-A Tree-sitter lint CLI and GitHub Action for cross-language quality gates
+
+A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python. The CLI and Action use the same parser, scoring contract, and policy.
+
+## Run locally
+
+Build the CLI with Rust 1.88 or newer and a C compiler. The resulting binary bundles the grammars and scans source directly.
+
+```sh
+cargo install --path . --locked
+lint-action scan --root /path/to/project
+```
+
+Create `.lint-action.json` at the source root. This example reports findings without enforcing the limits.
+
+```json
+{
+  "mode": "report-only",
+  "limits": {"rust": 20, "typescript": 20, "tsx": 20, "python": 15},
+  "include": ["src/**", "scripts/**"],
+  "exclude": ["**/generated/**", "**/node_modules/**"]
+}
+```
+
+A limit enables its language. Selectable extensions are `.rs`, `.ts`, `.mts`, `.cts`, `.tsx`, `.py`, and `.pyi`. Limits must be positive integers, and a score equal to its limit passes. `include` defaults to all paths and `exclude` defaults to empty. Globs are relative to the source root and use slash separators. Exclusions take precedence. The scanner prunes excluded directories and Git metadata, skips symlinks and unselected files it encounters, and reads up to 4 MiB per regular UTF-8 source file. A selection must include at least one source file.
+
+Use `--config /path/to/policy.json` to select another policy. To scan specific files or directories within the configured selection, pass their root-relative paths after `--`.
+
+## Adopt the gate
+
+| Mode | Behavior when a callable exceeds its limit |
+| --- | --- |
+| `report-only` | Reports the finding and allows the run to pass |
+| `strict` | Blocks the run |
+| `baseline` | Allows an existing exception when its identity is unique and its score is at or below the recorded score |
+
+Generate a baseline explicitly after reviewing the report. A successful generation writes JSON to stdout. Keep the checked-in baseline intact if generation fails.
+
+```sh
+lint-action baseline > .lint-action-baseline.json.new &&
+  mv .lint-action-baseline.json.new .lint-action-baseline.json
+```
+
+Set `mode` to `baseline` and check the policy and baseline into the base branch. The CLI reads `.lint-action-baseline.json` beside the policy unless you pass `--baseline`. A baseline entry records the path, language, and qualified callable identity without line numbers. Moving to another path or named scope, changing the callable identity, or introducing ambiguous names prevents a waiver. A directly returned callable uses a return-site identity within its enclosing scope. Other unbound anonymous callables are reported and cannot inherit waivers. Only unique, over-limit callables with stable identities are included when generating a baseline. Remove stale entries during deliberate baseline review.
+
+Use `lint-action validate --root /path/to/project` to check candidate policy and its baseline separately from enforcement.
+
+## Add to a workflow
+
+GitHub-hosted Ubuntu 24.04 x64 is the initial runner target. Add the step after checkout in an existing job on `pull_request` or `push`. Pin the Action to a reviewed full commit SHA. The job needs `contents: read` to check out its repository. The analyzer uses no repository credentials or project build. The Action builds the pinned analyzer and grammars using Cargo.
+
+```yaml
+permissions:
+  contents: read
+
+# Steps in an existing job
+steps:
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    with:
+      fetch-depth: 0
+      persist-credentials: false
+  - uses: lhajoosten/lint-action@<reviewed-full-commit-sha>
+    id: complexity
+```
+
+For pull requests, including forks, the Action scans the checkout with policy from the event's base SHA. Full checkout history makes that commit available locally. Land the policy before enabling the step. A trusted caller can set `policy-ref` to a full commit SHA already present in the checkout, or set `policy-directory` to an absolute directory outside `GITHUB_WORKSPACE` containing the trusted policy files. Keep these inputs under workflow maintainer control. Use `repository` if the checkout is in a subdirectory of `GITHUB_WORKSPACE`.
+
+The Action emits up to ten GitHub annotations and a job summary under **lint-action quality gate**. Its `report` output is the absolute path to the JSON report on the runner. For private repository sharing, enable access for eligible consumer repositories in Actions settings. [GitHub private Action access](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#managing-access-for-a-private-repository)
+
+To reproduce PR results, materialize the base policy and its baseline in a temporary directory, then run `lint-action scan --root /path/to/candidate --config /path/to/trusted/.lint-action.json`.
+
+## Report contract
+
+`scan` writes JSON with `format_version`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. Findings include the stable rule ID, source path, language, callable name and scope, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by path and start position. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, and empty scans.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Passed, with possible report-only or baselined findings |
+| 1 | Blocking findings |
+| 2 | Analysis or invocation failure, including in report-only mode |
+
+See the [scoring contract](docs/rules/cyclomatic-complexity.md) and the [Release Log pilot](docs/release-log-pilot.md).
+
+## Maintain the rule
+
+Language mappings live in `src/grammar.rs`. An adapter maps a grammar to callable scopes, named containers, and typed decision points. `src/analyzer.rs` owns tree traversal and decision attribution, while `src/model.rs` defines common diagnostics and locations. Keep new rule behavior independent of CLI and Action output. Add a source fixture with hand-calculated scores and assert the observable result through the CLI. Review the rule reference and scoring version when changing the contract.
+
+```sh
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo build --locked --release
+LINT_ACTION_BIN=target/release/lint-action python3 tests/cli.py
+LINT_ACTION_BIN=target/release/lint-action python3 tests/action_test.py
+```
