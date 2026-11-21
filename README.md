@@ -1,4 +1,4 @@
-# lint-action
+# lint-gate
 
 A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, and cognitive complexity and opt-in source duplication in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
 
@@ -8,7 +8,7 @@ Build the CLI with Rust 1.88 or newer and a C compiler. The resulting binary bun
 
 ```sh
 cargo install --path . --locked
-lint-action scan --root /path/to/project
+lint-gate scan --root /path/to/project
 ```
 
 Create `.lint-action.json` at the source root. This example reports findings without enforcing the limits.
@@ -48,13 +48,13 @@ Use `--config /path/to/policy.json` to select another policy. To scan specific f
 Generate a baseline explicitly after reviewing the report. A successful generation writes JSON to stdout. Keep the checked-in baseline intact if generation fails.
 
 ```sh
-lint-action baseline > .lint-action-baseline.json.new &&
+lint-gate baseline > .lint-action-baseline.json.new &&
   mv .lint-action-baseline.json.new .lint-action-baseline.json
 ```
 
 Set `mode` to `baseline` and check the policy and baseline into the base branch. The CLI reads `.lint-action-baseline.json` beside the policy unless you pass `--baseline`. A complexity baseline entry records the rule ID, path, language, and qualified callable identity without line numbers. Entries from earlier versions that omit the rule ID apply to cyclomatic complexity. Moving to another path or named scope, changing the callable identity, or introducing ambiguous names prevents a waiver. A directly returned callable uses a return-site identity within its enclosing scope. Other unbound anonymous callables are reported and cannot inherit waivers. Only unique, over-limit callables with stable identities are included when generating a baseline. Remove stale entries during deliberate baseline review.
 
-Use `lint-action validate --root /path/to/project` to check candidate policy and its baseline separately from enforcement.
+Use `lint-gate validate --root /path/to/project` to check candidate policy and its baseline separately from enforcement.
 
 ## Add to a workflow
 
@@ -70,15 +70,15 @@ steps:
     with:
       fetch-depth: 0
       persist-credentials: false
-  - uses: lhajoosten/lint-action@<reviewed-full-commit-sha>
+  - uses: lhajoosten/lint-gate@<reviewed-full-commit-sha>
     id: complexity
 ```
 
 For pull requests, including forks, the Action scans the checkout with policy from the event's base SHA. Full checkout history makes that commit available locally. Land the policy before enabling the step. A trusted caller can set `policy-ref` to a full commit SHA already present in the checkout, or set `policy-directory` to an absolute directory outside `GITHUB_WORKSPACE` containing the trusted policy files. Keep these inputs under workflow maintainer control. Use `repository` if the checkout is in a subdirectory of `GITHUB_WORKSPACE`.
 
-The Action emits up to ten GitHub annotations and a job summary under **lint-action quality gate**. Its `report` output is the absolute path to the JSON report on the runner. For private repository sharing, enable access for eligible consumer repositories in Actions settings. [GitHub private Action access](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#managing-access-for-a-private-repository)
+The Action emits up to ten GitHub annotations and a job summary under **lint-gate quality gate**. Its `report` output is the absolute path to the JSON report on the runner. For private repository sharing, enable access for eligible consumer repositories in Actions settings. [GitHub private Action access](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#managing-access-for-a-private-repository)
 
-To reproduce PR results, materialize the base policy and its baseline in a temporary directory, then run `lint-action scan --root /path/to/candidate --config /path/to/trusted/.lint-action.json`.
+To reproduce PR results, materialize the base policy and its baseline in a temporary directory, then run `lint-gate scan --root /path/to/candidate --config /path/to/trusted/.lint-action.json`.
 
 ## Report contract
 
@@ -92,6 +92,10 @@ To reproduce PR results, materialize the base policy and its baseline in a tempo
 
 See the [cyclomatic scoring contract](docs/rules/cyclomatic-complexity.md), the [cognitive scoring contract](docs/rules/cognitive-complexity.md), and the [Release Log pilot](docs/release-log-pilot.md).
 
+## Rolling Release
+
+Configure `RELEASE_APP_ID` and `RELEASE_BOT_USER_ID` as Actions variables and `RELEASE_APP_PRIVATE_KEY` as an Actions secret. The existing `RELEASE_LOG_PRIVATE_KEY` secret is accepted as a fallback. Merged pull requests get a read-only preview and a separate, pinned release writer. Set `RELEASE_LOG_WRITE_ENABLED=false` to pause writes. Manual dispatch runs the read-only preflight.
+
 ## Maintain the rules
 
 Language mappings live in `src/grammar.rs`. An adapter maps a grammar to callable scopes, named containers, and typed cyclomatic decision points. TypeScript cognitive scoring lives in `src/cognitive.rs`. `src/analyzer.rs` owns tree traversal and decision attribution, while `src/model.rs` defines common diagnostics and locations. Keep new rule behavior independent of CLI and Action output. Add a source fixture with hand-calculated scores and assert the observable result through the CLI. Review the rule reference and scoring version when changing the contract.
@@ -100,6 +104,6 @@ Language mappings live in `src/grammar.rs`. An adapter maps a grammar to callabl
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo build --locked --release
-LINT_ACTION_BIN=target/release/lint-action python3 tests/cli.py
-LINT_ACTION_BIN=target/release/lint-action python3 tests/action_test.py
+LINT_GATE_BIN=target/release/lint-gate python3 tests/cli.py
+LINT_GATE_BIN=target/release/lint-gate python3 tests/action_test.py
 ```

@@ -1,8 +1,8 @@
 [package]
-name = "lint-action"
+name = "lint-gate"
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/lhajoosten/lint-action"
+repository = "https://github.com/lhajoosten/lint-gate"
 rust-version = "1.88"
 description = "Tree-sitter quality gate for source complexity and duplication"
 

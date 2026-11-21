@@ -8,7 +8,7 @@ The Action adapter was run locally against a clean archive of Release Log commit
 | Baseline | 83 | 0 | 41 | 0 | 0 | 0 |
 | Baseline with a synthetic new function at score 21 | 84 | 0 | 41 | 1 | 0 | 1 |
 
-The synthetic function produced an error annotation with its file, line, callable name, score, and limit. The existing TypeScript debt includes a directly returned arrow in `createTextGenerator`. It received a unique return-site identity within the factory. The regression and generated baseline were tested in temporary directories. [Release Log pilot revision](https://github.com/lhajoosten/release-log/tree/3929887fbbb8309a55ad819a3d4f0063928a5340)
+The synthetic function produced an error annotation with its file, line, callable name, score, and limit. The existing TypeScript debt includes a directly returned arrow in `createTextGenerator`. It received a unique return-site identity within the factory. The regression and generated baseline were tested in temporary directories. [Release Log pilot revision](https://github.com/lhajoosten/rolling-release/tree/3929887fbbb8309a55ad819a3d4f0063928a5340)
 
 ## Integrate with Quality
 
@@ -36,6 +36,6 @@ Release Log is public. GitHub's cross-repository sharing for private Actions cov
 
 ## Text-generation provider boundary
 
-Release Log's `text-generation-owns-ai-sdk` contract reserves direct dependencies on `ai` and `@ai-sdk/*` for `src/text-generation.ts`. Production TypeScript imports the project's text-generation API when it needs optional generation. The dependency-cruiser check covers resolved package subpaths, re-exports and type-only imports. The existing transitive planning and deterministic release-notes checks keep those paths offline. [Pilot issue](https://github.com/lhajoosten/lint-action/issues/7) · [Release Log AI SDK ADR](https://github.com/lhajoosten/release-log/blob/14d3113d231d779c57170087ce2c374bf9c0c4b9/docs/adr/0002-ai-sdk-provider-integration.md)
+Release Log's `text-generation-owns-ai-sdk` contract reserves direct dependencies on `ai` and `@ai-sdk/*` for `src/text-generation.ts`. Production TypeScript imports the project's text-generation API when it needs optional generation. The dependency-cruiser check covers resolved package subpaths, re-exports and type-only imports. The existing transitive planning and deterministic release-notes checks keep those paths offline. [Pilot issue](https://github.com/lhajoosten/lint-gate/issues/7) · [Release Log AI SDK ADR](https://github.com/lhajoosten/rolling-release/blob/14d3113d231d779c57170087ce2c374bf9c0c4b9/docs/adr/0002-ai-sdk-provider-integration.md)
 
 The contract passed on the 112-module production graph through Release Log's architecture verification, which its Quality workflow already runs. Fixtures rejected SDK Core and provider imports outside the wrapper, including a type-only Core import and SDK subpath re-exports. The same fixtures accepted imports inside the wrapper and an application import of the project API. A forbidden edge produces the rule name, importer and resolved dependency in the Quality output.

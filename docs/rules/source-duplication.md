@@ -38,7 +38,7 @@ The JSON report keeps `format_version: 1`. Duplication adds a finding with `rule
 
 ## Rollout and baselines
 
-Start with `report-only`, inspect the pairs, and adjust the minimum for your repository. Use `strict` to block every qualifying pair. To adopt `baseline`, generate and review the baseline with `lint-action baseline`, then land it together with the policy. On pull requests the Action reads both from the trusted base commit.
+Start with `report-only`, inspect the pairs, and adjust the minimum for your repository. Use `strict` to block every qualifying pair. To adopt `baseline`, generate and review the baseline with `lint-gate baseline`, then land it together with the policy. On pull requests the Action reads both from the trusted base commit.
 
 A duplication baseline adds optional `duplication_entries` to the existing baseline schema. An entry records the two repository-relative paths and qualified named body identities, the accepted token count, and the exact normalized token sequence. It covers the same pair while its shared sequence is unchanged or shrinks to a contiguous portion of the accepted sequence. Separate paths or named bodies, longer runs, and different token sequences require new exceptions. Unrelated line shifts and comments preserve an exception.
 
@@ -48,7 +48,7 @@ A parse or resource error exits with status 2 in every mode. In particularly rep
 
 ## Release Log sample
 
-A report-only scan of 91 TypeScript source files at Release Log commit `8c4ff5a` demonstrated how the minimum changes the result. All three scans completed with zero diagnostics. [Release Log revision](https://github.com/lhajoosten/release-log/tree/8c4ff5a195dc2b757760d59db1298e4358cbe378)
+A report-only scan of 91 TypeScript source files at Release Log commit `8c4ff5a` demonstrated how the minimum changes the result. All three scans completed with zero diagnostics. [Release Log revision](https://github.com/lhajoosten/rolling-release/tree/8c4ff5a195dc2b757760d59db1298e4358cbe378)
 
 | Minimum tokens | Reported pairs |
 | --- | ---: |
