@@ -48,7 +48,7 @@ A parse or resource error exits with status 2 in every mode. In particularly rep
 
 ## Release Log sample
 
-A report-only scan of 91 TypeScript source files at Release Log commit `8c4ff5a` demonstrated how the minimum changes the result. All three scans completed with zero diagnostics. [Release Log revision](https://github.com/lhajoosten/release-log/tree/8c4ff5a195dc2b757760d59db1298e4358cbe378)
+A report-only scan of 91 TypeScript source files at Release Log commit `8c4ff5a` demonstrated how the minimum changes the result. All three scans completed with zero diagnostics. [Release Log revision](https://github.com/lhajoosten/rolling-release/tree/8c4ff5a195dc2b757760d59db1298e4358cbe378)
 
 | Minimum tokens | Reported pairs |
 | --- | ---: |
