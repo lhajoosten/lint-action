@@ -1,5 +1,5 @@
-name: Tree-sitter Complexity Gate
-description: Run the Tree-sitter quality gate on a checked-out repository
+name: Repository Lint Gate
+description: Check a repository against configurable lint rules in CI
 branding:
   icon: shield
   color: blue
