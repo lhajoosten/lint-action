@@ -1,7 +1,7 @@
 use crate::analyzer::{Analysis, analyze};
 use crate::duplication;
 use crate::grammar::Language;
-use crate::model::{Diagnostic, ErrorKind, Rule};
+use crate::model::{Diagnostic, ErrorKind};
 use crate::policy::{MAX_FILE_BYTES, Policy, bounded_read, normal_relative_path, slash_path};
 use std::collections::BTreeSet;
 use std::fs;
@@ -202,8 +202,7 @@ fn scan_file(
         })?;
     let source = std::str::from_utf8(&bytes)
         .map_err(|io| error(ErrorKind::InvalidEncoding, io.to_string()))?;
-    let budget = duplication_budget.filter(|_| Rule::SourceDuplication.supports(language));
-    analyze(&path, language, source, budget).map(Some)
+    analyze(&path, language, source, duplication_budget).map(Some)
 }
 
 fn path_error(kind: ErrorKind, path: &Path, message: impl Into<String>) -> Diagnostic {

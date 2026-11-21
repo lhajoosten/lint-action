@@ -12,18 +12,7 @@ pub enum Rule {
     SourceDuplication,
 }
 
-impl Rule {
-    pub fn supports(self, language: Language) -> bool {
-        match self {
-            Self::CyclomaticComplexity => true,
-            Self::CognitiveComplexity | Self::SourceDuplication => {
-                matches!(language, Language::Typescript | Language::Tsx)
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct Position {
     pub line: usize,
     pub column: usize,

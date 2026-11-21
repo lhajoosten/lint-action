@@ -39,87 +39,142 @@ struct Block {
     anchors: Vec<Identity>,
 }
 
-#[derive(Default)]
 pub struct Source {
     path: String,
+    language: Language,
     blocks: Vec<Block>,
     stack: Vec<Option<usize>>,
+    ignored: Option<usize>,
     pub tokens: usize,
     pub bytes: usize,
 }
 
 impl Source {
-    pub fn new(path: &str) -> Self {
+    pub fn new(path: &str, language: Language) -> Self {
         Self {
             path: path.to_owned(),
-            ..Self::default()
+            language,
+            blocks: Vec::new(),
+            stack: Vec::new(),
+            ignored: None,
+            tokens: 0,
+            bytes: 0,
         }
     }
 
-    pub fn enter(&mut self, node: Node<'_>, source: &str, language: Language, scope: &[Scope]) {
-        if node.kind() == "statement_block" {
-            if self.stack.is_empty() {
-                self.blocks.push(Block::default());
-            }
-            let block = self.blocks.last_mut().expect("block exists");
-            let owns_body = node.parent().is_some_and(|parent| {
-                parent.child_by_field_name("body") == Some(node)
-                    && (language.callable(parent, source).is_some()
-                        || language.container(parent, source).is_some())
-            });
-            let anchor = if owns_body {
-                let index = block.anchors.len();
-                block.anchors.push(Identity {
-                    path: self.path.clone(),
-                    language,
-                    scope: scope.to_vec(),
-                });
-                Some(index)
-            } else {
-                self.stack.last().copied().flatten()
-            };
-            self.stack.push(anchor);
+    pub fn enter(&mut self, node: Node<'_>, source: &str, scope: &[Scope]) {
+        if self.ignored.is_some() {
+            return;
+        }
+        if matches!(
+            node.kind(),
+            "comment" | "html_comment" | "line_comment" | "block_comment"
+        ) {
+            self.ignored = Some(node.id());
+            return;
+        }
+        let block_kind = self.language.statement_block();
+        if node.kind() == block_kind {
+            self.enter_block(node, source, scope);
         }
         let Some(&anchor) = self.stack.last() else {
             return;
         };
+        if self.language == Language::Python
+            && node.is_named()
+            && node
+                .parent()
+                .is_some_and(|parent| parent.kind() == block_kind)
+        {
+            self.add_marker(node, "python-statement", false);
+        }
         if node.child_count() != 0
-            || matches!(node.kind(), "comment" | "html_comment")
             || node.start_byte() == node.end_byte()
             || (self.stack.len() == 1
                 && matches!(node.kind(), "{" | "}")
                 && node
                     .parent()
-                    .is_some_and(|parent| parent.kind() == "statement_block"))
+                    .is_some_and(|parent| parent.kind() == block_kind))
         {
             return;
         }
-        let key = format!("{}\0{}", node.kind(), &source[node.byte_range()]);
+        self.push(Token {
+            key: format!("{}\0{}", node.kind(), &source[node.byte_range()]),
+            range: node.range().into(),
+            anchor,
+        });
+    }
+
+    fn enter_block(&mut self, node: Node<'_>, source: &str, scope: &[Scope]) {
+        if self.stack.is_empty() {
+            self.blocks.push(Block::default());
+        } else if self.language == Language::Python {
+            self.add_marker(node, "python-suite-start", false);
+        }
+        let block = self.blocks.last_mut().expect("block exists");
+        let owns_body = node.parent().is_some_and(|parent| {
+            parent.child_by_field_name("body") == Some(node)
+                && (self.language.callable(parent, source).is_some()
+                    || self.language.container(parent, source).is_some())
+        });
+        let anchor = if owns_body {
+            let index = block.anchors.len();
+            block.anchors.push(Identity {
+                path: self.path.clone(),
+                language: self.language,
+                scope: scope.to_vec(),
+            });
+            Some(index)
+        } else {
+            self.stack.last().copied().flatten()
+        };
+        self.stack.push(anchor);
+    }
+
+    pub fn exit(&mut self, node: Node<'_>) {
+        if let Some(ignored) = self.ignored {
+            if ignored == node.id() {
+                self.ignored = None;
+            }
+            return;
+        }
+        if node.kind() == self.language.statement_block() {
+            self.stack.pop();
+            if self.stack.is_empty() {
+                if self
+                    .blocks
+                    .last()
+                    .is_some_and(|block| block.tokens.is_empty())
+                {
+                    self.blocks.pop();
+                }
+            } else if self.language == Language::Python {
+                self.add_marker(node, "python-suite-end", true);
+            }
+        }
+    }
+
+    fn add_marker(&mut self, node: Node<'_>, name: &str, at_end: bool) {
+        let range = Range::from(node.range());
+        let point = if at_end { range.end } else { range.start };
+        self.push(Token {
+            key: format!("{name}\0boundary"),
+            range: Range {
+                start: point,
+                end: point,
+            },
+            anchor: self.stack.last().copied().flatten(),
+        });
+    }
+
+    fn push(&mut self, token: Token) {
         self.tokens += 1;
-        self.bytes += key.len();
+        self.bytes += token.key.len();
         self.blocks
             .last_mut()
             .expect("block exists")
             .tokens
-            .push(Token {
-                key,
-                range: node.range().into(),
-                anchor,
-            });
-    }
-
-    pub fn exit(&mut self, node: Node<'_>) {
-        if node.kind() == "statement_block" {
-            self.stack.pop();
-            if self.stack.is_empty()
-                && self
-                    .blocks
-                    .last()
-                    .is_some_and(|block| block.tokens.is_empty())
-            {
-                self.blocks.pop();
-            }
-        }
+            .push(token);
     }
 }
 
@@ -308,12 +363,15 @@ pub fn find(sources: &[Source], minimum: usize) -> Result<Vec<Match<'_>>, Diagno
     let blocks: Vec<_> = sources
         .iter()
         .flat_map(|source| {
-            source
-                .blocks
-                .iter()
-                .map(|block| (source.path.as_str(), block))
+            source.blocks.iter().map(|block| {
+                (
+                    source.language.duplication_family(),
+                    source.path.as_str(),
+                    block,
+                )
+            })
         })
-        .filter(|(_, block)| block.tokens.len() >= minimum)
+        .filter(|(_, _, block)| block.tokens.len() >= minimum)
         .collect();
     if blocks.is_empty() {
         return Ok(Vec::new());
@@ -321,7 +379,7 @@ pub fn find(sources: &[Source], minimum: usize) -> Result<Vec<Match<'_>>, Diagno
     let mut ids = HashMap::new();
     let sequences: Vec<Vec<u32>> = blocks
         .iter()
-        .map(|(_, block)| {
+        .map(|(_, _, block)| {
             block
                 .tokens
                 .iter()
@@ -333,17 +391,18 @@ pub fn find(sources: &[Source], minimum: usize) -> Result<Vec<Match<'_>>, Diagno
         })
         .collect();
     let ranks = Ranks::new(sequences);
-    let mut seeds: HashMap<u64, BTreeMap<u32, Vec<Window>>> = HashMap::new();
+    let mut seeds: HashMap<(Language, u64), BTreeMap<u32, Vec<Window>>> = HashMap::new();
     let leading_power = (1..minimum).fold(1u64, |value, _| value.wrapping_mul(HASH_BASE));
     let mut candidates = Vec::new();
     let mut remaining = MAX_WORK;
     for (block, tokens) in ranks.0[0].iter().enumerate() {
+        let (family, _, source_block) = blocks[block];
         let mut hash = tokens[..minimum].iter().fold(0u64, |hash, token| {
             hash.wrapping_mul(HASH_BASE).wrapping_add(u64::from(*token))
         });
         for start in 0..=tokens.len() - minimum {
             let previous = if start == 0 { 0 } else { tokens[start - 1] };
-            let groups = seeds.entry(hash).or_default();
+            let groups = seeds.entry((family, hash)).or_default();
             let right = Window { block, start };
             for (&preceding, windows) in groups.iter() {
                 if previous != 0 && previous == preceding {
@@ -355,7 +414,13 @@ pub fn find(sources: &[Source], minimum: usize) -> Result<Vec<Match<'_>>, Diagno
                         continue;
                     }
                     let len = ranks.match_length(left, right, &mut remaining)?;
-                    if len >= minimum {
+                    if len >= minimum
+                        && (family != Language::Python
+                            || contains_source(
+                                &source_block.tokens[start..start + len],
+                                &mut remaining,
+                            )?)
+                    {
                         if candidates.len() == MAX_MATCHES {
                             return Err(resource_limit());
                         }
@@ -380,7 +445,10 @@ pub fn find(sources: &[Source], minimum: usize) -> Result<Vec<Match<'_>>, Diagno
         matches
             .into_iter()
             .map(|candidate| Match {
-                blocks: candidate.windows.map(|window| blocks[window.block]),
+                blocks: candidate.windows.map(|window| {
+                    let (_, path, block) = blocks[window.block];
+                    (path, block)
+                }),
                 candidate,
             })
             .collect()
@@ -422,6 +490,16 @@ fn consolidate(
     let mut matches: Vec<_> = by_blocks.into_values().flatten().collect();
     matches.sort_unstable_by_key(|item| item.windows);
     Ok(matches)
+}
+
+fn contains_source(tokens: &[Token], remaining: &mut usize) -> Result<bool, Diagnostic> {
+    for token in tokens {
+        spend(remaining)?;
+        if token.range.start != token.range.end {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn spend(remaining: &mut usize) -> Result<(), Diagnostic> {

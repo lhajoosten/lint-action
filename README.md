@@ -1,6 +1,6 @@
 # lint-action
 
-A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, and cognitive complexity and opt-in source duplication in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
+A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity, cognitive complexity, and opt-in source duplication in Rust, Python, and TypeScript, including TSX. The CLI and Action use the same parser, scoring contract, and policy.
 
 ## Run locally
 
@@ -21,7 +21,7 @@ Create `.lint-action.json` at the source root. This example reports findings wit
 }
 ```
 
-Both complexity rules default to a limit of **12**. Omitting `limits` enables cyclomatic complexity in all supported languages. If supplied, `limits` selects the enabled languages and gives their cyclomatic limits. Cognitive complexity runs for enabled TypeScript and TSX. Set `cognitive_limits` to override either cognitive limit independently.
+Both complexity rules default to a limit of **12**. Omitting `limits` enables both complexity rules in all supported languages. If supplied, `limits` selects the enabled languages and gives their cyclomatic limits. Set `cognitive_limits` to override the cognitive limit independently for any enabled language.
 
 ```json
 {
@@ -33,7 +33,7 @@ Both complexity rules default to a limit of **12**. Omitting `limits` enables cy
 
 TypeScript uses limits 10 and 15 in this example. TSX uses 12 for both rules. Selectable extensions are `.rs`, `.ts`, `.mts`, `.cts`, `.tsx`, `.py`, and `.pyi`. Complexity limits must be positive integers, and a score equal to its complexity limit passes. `include` defaults to all paths and `exclude` defaults to empty. Globs are relative to the source root and use slash separators. Exclusions take precedence. The scanner prunes excluded directories and Git metadata, skips symlinks and unselected files it encounters, and reads up to 4 MiB per regular UTF-8 source file. A selection must include at least one source file.
 
-To compare TypeScript and TSX for source duplication, add `"duplication": {}` to the policy. It uses a minimum of 50 shared syntax tokens by default. See the [source duplication rule](docs/rules/source-duplication.md) for matching and rollout details.
+Add `"duplication": {}` to compare source for duplication across the selected paths. The rule covers all supported languages and uses a minimum of 50 shared syntax tokens by default. See the [source duplication rule](docs/rules/source-duplication.md) for matching and rollout details.
 
 Use `--config /path/to/policy.json` to select another policy. To scan specific files or directories within the configured selection, pass their root-relative paths after `--`.
 
@@ -94,7 +94,7 @@ See the [cyclomatic scoring contract](docs/rules/cyclomatic-complexity.md), the 
 
 ## Maintain the rules
 
-Language mappings live in `src/grammar.rs`. An adapter maps a grammar to callable scopes, named containers, and typed cyclomatic decision points. TypeScript cognitive scoring lives in `src/cognitive.rs`. `src/analyzer.rs` owns tree traversal and decision attribution, while `src/model.rs` defines common diagnostics and locations. Keep new rule behavior independent of CLI and Action output. Add a source fixture with hand-calculated scores and assert the observable result through the CLI. Review the rule reference and scoring version when changing the contract.
+Language mappings live in `src/grammar.rs`. An adapter maps a grammar to callable scopes, named containers, and typed cyclomatic decision points. Cognitive scoring for each grammar lives in `src/cognitive.rs`. `src/analyzer.rs` owns tree traversal and decision attribution, while `src/model.rs` defines common diagnostics and locations. Keep new rule behavior independent of CLI and Action output. Add a source fixture with hand-calculated scores and assert the observable result through the CLI. Review the rule reference and scoring version when changing the contract.
 
 ```sh
 cargo fmt --check
