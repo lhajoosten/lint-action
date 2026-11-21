@@ -33,3 +33,9 @@ Release Log is public. GitHub's cross-repository sharing for private Actions cov
    ```
 
 3. Review the report-only findings. Generate and review the baseline at the chosen threshold, then switch the policy to `baseline`. Land both files together. The next PR will use that policy from its base commit. Release Log's Oxlint config currently leaves the complexity rule disabled, so the Action can own complexity enforcement without removing an existing rule.
+
+## Text-generation provider boundary
+
+Release Log's `text-generation-owns-ai-sdk` contract reserves direct dependencies on `ai` and `@ai-sdk/*` for `src/text-generation.ts`. Production TypeScript imports the project's text-generation API when it needs optional generation. The dependency-cruiser check covers resolved package subpaths, re-exports and type-only imports. The existing transitive planning and deterministic release-notes checks keep those paths offline. [Pilot issue](https://github.com/lhajoosten/lint-action/issues/7) · [Release Log AI SDK ADR](https://github.com/lhajoosten/release-log/blob/14d3113d231d779c57170087ce2c374bf9c0c4b9/docs/adr/0002-ai-sdk-provider-integration.md)
+
+The contract passed on the 112-module production graph through Release Log's architecture verification, which its Quality workflow already runs. Fixtures rejected SDK Core and provider imports outside the wrapper, including a type-only Core import and SDK subpath re-exports. The same fixtures accepted imports inside the wrapper and an application import of the project API. A forbidden edge produces the rule name, importer and resolved dependency in the Quality output.
