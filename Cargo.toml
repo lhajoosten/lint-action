@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/lhajoosten/lint-action"
 rust-version = "1.88"
-description = "Tree-sitter cyclomatic and cognitive complexity quality gate"
+description = "Tree-sitter quality gate for source complexity and duplication"
 
 [dependencies]
 clap = { version = "=4.5.50", features = ["derive"] }

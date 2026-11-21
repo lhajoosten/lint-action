@@ -114,6 +114,12 @@ def text_for_summary(value):
     return "<code>" + html.escape(quoted) + "</code>"
 
 
+def format_occurrence(occurrence):
+    start, end = (occurrence["range"][point] for point in ("start", "end"))
+    return (f'{occurrence["path"]}:{start["line"]}:{start["column"]}'
+            f'-{end["line"]}:{end["column"]}')
+
+
 def render(report, code, relative_repository):
     findings = report["findings"]
     diagnostics = report["diagnostics"]
@@ -131,18 +137,25 @@ def render(report, code, relative_repository):
         for item in findings:
             if item["status"] != status:
                 continue
-            rule = item["rule"].replace("-", " ")
-            message = (f'{item["name"]} has {rule} {item["score"]} '
-                       f'(limit {item["limit"]}, {status})')
-            contributions = sorted(item.get("contributions", []), key=lambda part: -part["points"])
-            if contributions:
-                details = ", ".join(
-                    f'+{part["points"]} {part["construct"]} at line {part["range"]["start"]["line"]}'
-                    for part in contributions[:3]
-                )
-                message += f". Largest contributions: {details}"
+            rule = item["rule"]
+            if rule == "source-duplication":
+                primary, secondary = item["occurrences"]
+                message = (f'{rule}: {item["score"]} shared tokens (minimum {item["limit"]}, {status}) '
+                           f'at {format_occurrence(primary)} and {format_occurrence(secondary)}')
+            else:
+                primary = item
+                rule = rule.replace("-", " ")
+                message = (f'{item["name"]} has {rule} {item["score"]} '
+                           f'(limit {item["limit"]}, {status})')
+                contributions = sorted(item.get("contributions", []), key=lambda part: -part["points"])
+                if contributions:
+                    details = ", ".join(
+                        f'+{part["points"]} {part["construct"]} at line {part["range"]["start"]["line"]}'
+                        for part in contributions[:3]
+                    )
+                    message += f". Largest contributions: {details}"
             messages.append(("error" if status == "blocking" else "warning",
-                             message, item["path"], item["range"]["start"]))
+                             message, primary["path"], primary["range"]["start"]))
     for level, message, path, location in messages[:ANNOTATION_LIMIT]:
         file_path = (relative_repository / path).as_posix() if path else None
         annotation(level, message, file_path, location)

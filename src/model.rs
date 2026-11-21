@@ -9,13 +9,16 @@ pub enum Rule {
     #[default]
     CyclomaticComplexity,
     CognitiveComplexity,
+    SourceDuplication,
 }
 
 impl Rule {
     pub fn supports(self, language: Language) -> bool {
         match self {
             Self::CyclomaticComplexity => true,
-            Self::CognitiveComplexity => matches!(language, Language::Typescript | Language::Tsx),
+            Self::CognitiveComplexity | Self::SourceDuplication => {
+                matches!(language, Language::Typescript | Language::Tsx)
+            }
         }
     }
 }
@@ -84,6 +87,7 @@ pub enum ErrorKind {
     InvalidEncoding,
     ParseError,
     EmptyScan,
+    DuplicationLimit,
 }
 
 #[derive(Debug, Serialize)]

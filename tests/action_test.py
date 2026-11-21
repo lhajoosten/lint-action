@@ -14,6 +14,12 @@ PROJECT = Path(__file__).resolve().parent.parent
 BIN = Path(os.environ["LINT_ACTION_BIN"]).resolve()
 
 
+DUPLICATION_MESSAGE = (
+    "source-duplication: 10 shared tokens (minimum 10, blocking) "
+    "at copy.tsx:1:19-1:45 and original.ts:1:23-1:49"
+)
+
+
 class ActionTests(unittest.TestCase):
     def test_trusted_base_report_and_annotations(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -41,6 +47,8 @@ class ActionTests(unittest.TestCase):
                 self.assertEqual(process.returncode, code, (process.stdout, process.stderr))
                 reports.append(Path(Path(env["GITHUB_OUTPUT"]).read_text().splitlines()[-1][7:]))
                 if code:
+                    self.assertIn("file=action-fixture-fail/copy.tsx,line=1,col=19::"
+                                  + DUPLICATION_MESSAGE, process.stdout)
                     self.assertIn(
                         "file=action-fixture-fail/new%2C%3A%25%0Aname.ts,line=1,col=22"
                         "::fresh has cyclomatic complexity 2 (limit 1, blocking)",
@@ -54,9 +62,12 @@ class ActionTests(unittest.TestCase):
             summary = Path(env["GITHUB_STEP_SUMMARY"]).read_text()
             self.assertIn("Outcome: **passed**", summary)
             self.assertIn("Outcome: **violations**", summary)
-            self.assertIn("Baselined: 1 · Blocking: 3", summary)
+            self.assertIn("Baselined: 1 · Blocking: 4", summary)
+            self.assertIn(DUPLICATION_MESSAGE, summary)
 
             failing = workspace / env["LINT_ACTION_REPOSITORY"]
+            candidate_baseline = json.loads((failing / BASELINE).read_bytes())
+            self.assertEqual(candidate_baseline["duplication_entries"][0]["score"], 10)
             candidate_policy = failing / CONFIG
             candidate_policy.write_text('{"mode":"report-only","limits":{"typescript":999}}')
             process = subprocess.run(
@@ -65,6 +76,7 @@ class ActionTests(unittest.TestCase):
             )
             self.assertEqual(process.returncode, 1, process.stdout)
             self.assertIn("complexity 2 (limit 1, blocking)", process.stdout)
+            self.assertIn(DUPLICATION_MESSAGE, process.stdout)
             git(failing, "restore", "--", CONFIG)
 
             # A candidate cannot provide a baseline absent from the trusted commit.
