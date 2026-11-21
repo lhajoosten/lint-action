@@ -1,13 +1,15 @@
 mod analyzer;
 mod cognitive;
+mod duplication;
 mod grammar;
 mod model;
 mod policy;
 mod scan;
 
 use crate::analyzer::Analysis;
+use crate::duplication::{Duplication, Match, Pair};
 use crate::grammar::ANONYMOUS;
-use crate::model::{Callable, Diagnostic, Identity, SCORING_VERSION};
+use crate::model::{Callable, Diagnostic, Identity, Position, Rule, SCORING_VERSION};
 use crate::policy::{BASELINE_FILE, Baseline, BaselineScores, CONFIG_FILE, Mode, Policy};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
@@ -84,7 +86,7 @@ impl Settings {
         } else if mode == Mode::Baseline {
             Baseline::load(&self.input.config_path().with_file_name(BASELINE_FILE))
         } else {
-            Ok(BTreeMap::new())
+            Ok(BaselineScores::default())
         }
     }
 }
@@ -100,9 +102,40 @@ enum Status {
 #[derive(Serialize)]
 struct Finding {
     #[serde(flatten)]
-    callable: Callable,
+    detail: Detail,
     limit: u32,
     status: Status,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Detail {
+    Complexity(Callable),
+    Duplication(Duplication),
+}
+
+impl Detail {
+    fn location(&self) -> (&str, usize, usize, Rule) {
+        let (path, Position { line, column }, rule) = match self {
+            Self::Complexity(item) => (&item.identity.path, item.range.start, item.rule),
+            Self::Duplication(item) => (
+                &item.occurrences[0].path,
+                item.occurrences[0].range.start,
+                item.rule,
+            ),
+        };
+        (path, line, column, rule)
+    }
+}
+
+impl Status {
+    fn for_mode(mode: Mode, covered: bool) -> Self {
+        match mode {
+            Mode::ReportOnly => Self::Reported,
+            Mode::Baseline if covered => Self::Baselined,
+            Mode::Strict | Mode::Baseline => Self::Blocking,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -177,54 +210,51 @@ fn scan(
     report.files_skipped = scan.files_skipped;
     let Analysis {
         callables,
-        diagnostics,
+        mut diagnostics,
         scope_counts,
+        duplication,
     } = scan.analysis;
+    let matches = duplication_matches(&policy, &duplication, &mut diagnostics);
     report.diagnostics = diagnostics;
     for mut callable in callables {
-        let limit = policy
-            .limit(callable.identity.language, callable.rule)
-            .expect("scanned language is enabled");
+        let Some(limit) = policy.limit(callable.identity.language, callable.rule) else {
+            continue;
+        };
         if callable.score <= u64::from(limit) {
             continue;
         }
-        let status = match policy.mode {
-            Mode::ReportOnly => Status::Reported,
-            Mode::Baseline
-                if baseline
-                    .get(&callable.rule)
-                    .and_then(|scores| scores.get(&callable.identity))
-                    .and_then(|&score| score)
-                    .is_some_and(|score| score >= callable.score)
-                    && unique(&callable.identity, &scope_counts) =>
-            {
-                Status::Baselined
-            }
-            Mode::Strict | Mode::Baseline => Status::Blocking,
-        };
+        let covered = policy.mode == Mode::Baseline
+            && baseline
+                .complexity
+                .get(&callable.rule)
+                .and_then(|scores| scores.get(&callable.identity))
+                .and_then(|&score| score)
+                .is_some_and(|score| score >= callable.score)
+            && unique(&callable.identity, &scope_counts);
         callable
             .contributions
             .sort_by_key(|part| (part.range.start.line, part.range.start.column));
         report.findings.push(Finding {
-            callable,
+            detail: Detail::Complexity(callable),
             limit,
-            status,
+            status: Status::for_mode(policy.mode, covered),
         });
     }
-    report.findings.sort_by(|left, right| {
-        (
-            &left.callable.identity.path,
-            left.callable.range.start.line,
-            left.callable.range.start.column,
-            left.callable.rule,
-        )
-            .cmp(&(
-                &right.callable.identity.path,
-                right.callable.range.start.line,
-                right.callable.range.start.column,
-                right.callable.rule,
-            ))
-    });
+    if let Some(limit) = policy.duplication_minimum {
+        let pairs = match_pairs(&matches, &scope_counts);
+        for (found, pair) in matches.iter().zip(pairs) {
+            let covered = policy.mode == Mode::Baseline
+                && pair.is_some_and(|pair| baseline.covers(&pair, found));
+            report.findings.push(Finding {
+                detail: Detail::Duplication(found.report()),
+                limit,
+                status: Status::for_mode(policy.mode, covered),
+            });
+        }
+    }
+    report
+        .findings
+        .sort_by(|left, right| left.detail.location().cmp(&right.detail.location()));
     Ok(())
 }
 
@@ -232,7 +262,7 @@ fn generate(
     input: &ConfigInput,
     paths: &[PathBuf],
     report: &mut Report,
-) -> Result<Option<Baseline>, Diagnostic> {
+) -> Result<Option<Vec<u8>>, Diagnostic> {
     let policy = input.policy()?;
     report.mode = Some(policy.mode);
     let scan = scan::scan(&input.root, paths, &policy);
@@ -240,21 +270,50 @@ fn generate(
     report.files_skipped = scan.files_skipped;
     let Analysis {
         callables,
-        diagnostics,
+        mut diagnostics,
         scope_counts,
+        duplication,
     } = scan.analysis;
+    let matches = duplication_matches(&policy, &duplication, &mut diagnostics);
     report.diagnostics = diagnostics;
     if !report.diagnostics.is_empty() {
         return Ok(None);
     }
-    Ok(Some(Baseline::generate(callables.iter().filter(
-        |callable| {
+    let pairs = match_pairs(&matches, &scope_counts);
+    let baseline = Baseline::generate(
+        callables.iter().filter(|callable| {
             policy
                 .limit(callable.identity.language, callable.rule)
                 .is_some_and(|limit| callable.score > u64::from(limit))
                 && unique(&callable.identity, &scope_counts)
-        },
-    ))))
+        }),
+        pairs
+            .into_iter()
+            .zip(&matches)
+            .filter_map(|(pair, found)| Some((pair?, found))),
+    )?;
+    baseline.to_json().map(Some)
+}
+
+fn duplication_matches<'a>(
+    policy: &Policy,
+    sources: &'a [duplication::Source],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<Match<'a>> {
+    if let Some(limit) = policy.duplication_minimum {
+        match duplication::find(sources, limit as usize) {
+            Ok(matches) => return matches,
+            Err(diagnostic) => diagnostics.push(diagnostic),
+        }
+    }
+    Vec::new()
+}
+
+fn match_pairs(matches: &[Match<'_>], counts: &BTreeMap<Identity, usize>) -> Vec<Option<Pair>> {
+    duplication::unique_pairs(matches)
+        .into_iter()
+        .map(|pair| pair.filter(|pair| pair.iter().all(|identity| unique(identity, counts))))
+        .collect()
 }
 
 fn write_json(mut output: impl Write, value: &impl Serialize) -> io::Result<()> {
@@ -278,7 +337,7 @@ fn run(command: Command) -> io::Result<u8> {
         Command::Baseline { input, paths } => {
             match generate(&input, &paths, &mut report) {
                 Ok(Some(baseline)) => {
-                    write_json(io::stdout().lock(), &baseline)?;
+                    io::stdout().lock().write_all(&baseline)?;
                     return Ok(0);
                 }
                 Ok(None) => {}

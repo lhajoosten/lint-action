@@ -1,4 +1,5 @@
 use crate::analyzer::{Analysis, analyze};
+use crate::duplication;
 use crate::grammar::Language;
 use crate::model::{Diagnostic, ErrorKind, Rule};
 use crate::policy::{MAX_FILE_BYTES, Policy, bounded_read, normal_relative_path, slash_path};
@@ -44,12 +45,30 @@ pub fn scan(root: &Path, paths: &[PathBuf], policy: &Policy) -> Scan {
         .sort_by(|left, right| (&left.path, &left.message).cmp(&(&right.path, &right.message)));
     scan.analysis.diagnostics.extend(diagnostics);
 
+    let mut duplication_budget = policy
+        .duplication_minimum
+        .map(|_| (duplication::MAX_TOKENS, duplication::MAX_TOKEN_BYTES));
     for path in files {
-        match scan_file(&root, &path, policy) {
+        match scan_file(&root, &path, policy, duplication_budget) {
             Ok(Some(result)) => {
                 scan.files_scanned += 1;
                 scan.analysis.callables.extend(result.callables);
                 scan.analysis.scope_counts.extend(result.scope_counts);
+                if result
+                    .diagnostics
+                    .iter()
+                    .any(|error| error.kind == ErrorKind::DuplicationLimit)
+                {
+                    duplication_budget = None;
+                    scan.analysis.duplication.clear();
+                }
+                for source in result.duplication {
+                    if let Some((tokens, bytes)) = &mut duplication_budget {
+                        *tokens -= source.tokens;
+                        *bytes -= source.bytes;
+                        scan.analysis.duplication.push(source);
+                    }
+                }
                 scan.analysis.diagnostics.extend(result.diagnostics);
             }
             Ok(None) => scan.files_skipped += 1,
@@ -138,6 +157,7 @@ fn scan_file(
     root: &Path,
     full_path: &Path,
     policy: &Policy,
+    duplication_budget: Option<(usize, usize)>,
 ) -> Result<Option<Analysis>, Diagnostic> {
     let path = full_path
         .strip_prefix(root)
@@ -145,7 +165,7 @@ fn scan_file(
     let Some(language) = Language::from_path(path) else {
         return Ok(None);
     };
-    if policy.limit(language, Rule::CyclomaticComplexity).is_none()
+    if !policy.selects(language)
         || !policy.includes(path)
         || path
             .ancestors()
@@ -182,7 +202,8 @@ fn scan_file(
         })?;
     let source = std::str::from_utf8(&bytes)
         .map_err(|io| error(ErrorKind::InvalidEncoding, io.to_string()))?;
-    analyze(&path, language, source).map(Some)
+    let budget = duplication_budget.filter(|_| Rule::SourceDuplication.supports(language));
+    analyze(&path, language, source, budget).map(Some)
 }
 
 fn path_error(kind: ErrorKind, path: &Path, message: impl Into<String>) -> Diagnostic {

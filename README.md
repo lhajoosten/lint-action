@@ -1,6 +1,6 @@
 # lint-action
 
-A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, and cognitive complexity in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
+A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, and cognitive complexity and opt-in source duplication in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
 
 ## Run locally
 
@@ -21,7 +21,7 @@ Create `.lint-action.json` at the source root. This example reports findings wit
 }
 ```
 
-Both rules default to a limit of **12**. Omitting `limits` enables cyclomatic complexity in all supported languages. If supplied, `limits` selects the enabled languages and gives their cyclomatic limits. Cognitive complexity runs for enabled TypeScript and TSX. Set `cognitive_limits` to override either cognitive limit independently.
+Both complexity rules default to a limit of **12**. Omitting `limits` enables cyclomatic complexity in all supported languages. If supplied, `limits` selects the enabled languages and gives their cyclomatic limits. Cognitive complexity runs for enabled TypeScript and TSX. Set `cognitive_limits` to override either cognitive limit independently.
 
 ```json
 {
@@ -31,13 +31,15 @@ Both rules default to a limit of **12**. Omitting `limits` enables cyclomatic co
 }
 ```
 
-TypeScript uses limits 10 and 15 in this example. TSX uses 12 for both rules. Selectable extensions are `.rs`, `.ts`, `.mts`, `.cts`, `.tsx`, `.py`, and `.pyi`. Limits must be positive integers, and a score equal to its limit passes. `include` defaults to all paths and `exclude` defaults to empty. Globs are relative to the source root and use slash separators. Exclusions take precedence. The scanner prunes excluded directories and Git metadata, skips symlinks and unselected files it encounters, and reads up to 4 MiB per regular UTF-8 source file. A selection must include at least one source file.
+TypeScript uses limits 10 and 15 in this example. TSX uses 12 for both rules. Selectable extensions are `.rs`, `.ts`, `.mts`, `.cts`, `.tsx`, `.py`, and `.pyi`. Complexity limits must be positive integers, and a score equal to its complexity limit passes. `include` defaults to all paths and `exclude` defaults to empty. Globs are relative to the source root and use slash separators. Exclusions take precedence. The scanner prunes excluded directories and Git metadata, skips symlinks and unselected files it encounters, and reads up to 4 MiB per regular UTF-8 source file. A selection must include at least one source file.
+
+To compare TypeScript and TSX for source duplication, add `"duplication": {}` to the policy. It uses a minimum of 50 shared syntax tokens by default. See the [source duplication rule](docs/rules/source-duplication.md) for matching and rollout details.
 
 Use `--config /path/to/policy.json` to select another policy. To scan specific files or directories within the configured selection, pass their root-relative paths after `--`.
 
 ## Adopt the gate
 
-| Mode | Behavior when a callable exceeds its limit |
+| Mode | Behavior for qualifying findings |
 | --- | --- |
 | `report-only` | Reports the finding and allows the run to pass |
 | `strict` | Blocks the run |
@@ -50,7 +52,7 @@ lint-action baseline > .lint-action-baseline.json.new &&
   mv .lint-action-baseline.json.new .lint-action-baseline.json
 ```
 
-Set `mode` to `baseline` and check the policy and baseline into the base branch. The CLI reads `.lint-action-baseline.json` beside the policy unless you pass `--baseline`. A baseline entry records the rule ID, path, language, and qualified callable identity without line numbers. Entries from earlier versions that omit the rule ID apply to cyclomatic complexity. Moving to another path or named scope, changing the callable identity, or introducing ambiguous names prevents a waiver. A directly returned callable uses a return-site identity within its enclosing scope. Other unbound anonymous callables are reported and cannot inherit waivers. Only unique, over-limit callables with stable identities are included when generating a baseline. Remove stale entries during deliberate baseline review.
+Set `mode` to `baseline` and check the policy and baseline into the base branch. The CLI reads `.lint-action-baseline.json` beside the policy unless you pass `--baseline`. A complexity baseline entry records the rule ID, path, language, and qualified callable identity without line numbers. Entries from earlier versions that omit the rule ID apply to cyclomatic complexity. Moving to another path or named scope, changing the callable identity, or introducing ambiguous names prevents a waiver. A directly returned callable uses a return-site identity within its enclosing scope. Other unbound anonymous callables are reported and cannot inherit waivers. Only unique, over-limit callables with stable identities are included when generating a baseline. Remove stale entries during deliberate baseline review.
 
 Use `lint-action validate --root /path/to/project` to check candidate policy and its baseline separately from enforcement.
 
@@ -80,7 +82,7 @@ To reproduce PR results, materialize the base policy and its baseline in a tempo
 
 ## Report contract
 
-`scan` writes JSON with `format_version`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. Findings include the stable rule ID, source path, language, callable name and scope, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by path, start position, and rule. Cognitive findings include the scoring contributions. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, and empty scans.
+`scan` writes JSON with `format_version`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. All findings include a stable rule ID, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by the first occurrence's path and start position, then by rule. Complexity findings retain the source path, language, callable name, scope, and range. Cognitive findings include the scoring contributions. Duplication findings carry two locations in `occurrences`, and `limit` is an inclusive minimum. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, empty scans, and the duplication analysis budget.
 
 | Exit | Meaning |
 | --- | --- |

@@ -40,6 +40,132 @@ class CliTests(unittest.TestCase):
         stream = result.stderr if command == "baseline" and code else result.stdout
         return json.loads(stream), result.stdout
 
+    def duplication(self, mode="report-only", minimum=10, **options):
+        self.config(mode, limits={}, duplication={"minimum_tokens": minimum}, **options)
+
+    def test_source_duplication_locations_selection_and_threshold(self):
+        self.duplication(exclude=["vendor/**"])
+        self.write("old.ts", "function old() {\n  const café = 0; prepare(item); send(item);\n}\n")
+        self.write("src/new.tsx", """function copy() {
+  prepare( item ); // comments do not split a match
+  send(item);
+}
+function another() { prepare(item); send(item); }
+""")
+        self.write("vendor/ignored.ts", "function excluded() { prepare(item); send(item); }")
+        self.write("different.ts", 'function different() { prepare(other); send("item"); }')
+        self.write("ignored.py", "def copy(): pass")
+        report, raw = self.invoke(0)
+        self.assertEqual(report["files_scanned"], 3)
+        self.assertEqual(report["diagnostics"], [])
+        self.assertEqual(len(report["findings"]), 3)
+        self.assertTrue(all(
+            (item["rule"], item["score"], item["limit"], item["status"])
+            == ("source-duplication", 10, 10, "reported")
+            for item in report["findings"]
+        ))
+        self.assertEqual(report["findings"][0]["occurrences"], [
+            {"path": "old.ts", "range": {"start": {"line": 2, "column": 20},
+                                        "end": {"line": 2, "column": 46}}},
+            {"path": "src/new.tsx", "range": {"start": {"line": 2, "column": 3},
+                                              "end": {"line": 3, "column": 14}}},
+        ])
+        self.assertEqual([item["path"] for item in report["findings"][-1]["occurrences"]],
+                         ["src/new.tsx", "src/new.tsx"])
+        self.assertEqual(self.invoke(0)[1], raw)
+        selected, _ = self.invoke(0, "scan", "--", "src/new.tsx", "vendor/ignored.ts")
+        self.assertEqual(len(selected["findings"]), 1)
+        self.duplication("strict", 11, exclude=["vendor/**"])
+        self.assertEqual(self.invoke(0)[0]["findings"], [])
+        self.duplication("strict", 10, exclude=["vendor/**"])
+        self.invoke(1)
+        self.config("strict", limits={"typescript": 100, "tsx": 100}, exclude=["vendor/**"])
+        self.assertEqual(self.invoke(0)[0]["findings"], [])
+
+    def test_source_duplication_keeps_token_spellings(self):
+        expression = 'record(item + "value");'
+        self.write("first.ts", f"function first() {{ {expression} }}")
+        self.write("second.tsx", f"function second() {{ {expression} }}")
+        self.duplication(minimum=9)
+        self.assertEqual(self.invoke(0)[0]["findings"][0]["score"], 9)
+        for old, new in (("item", "other"), ("+", "-"), ('"value"', '"changed"')):
+            self.write("second.tsx", f"function second() {{ {expression.replace(old, new)} }}")
+            self.assertEqual(self.invoke(0)[0]["findings"], [])
+        self.duplication(minimum=2**32 - 1)
+        self.assertEqual(self.invoke(0)[0]["findings"], [])
+
+    def test_source_duplication_baseline_is_pair_and_content_specific(self):
+        self.duplication("baseline")
+        long = "prepare(item); send(item); cleanup(item);"
+        shorter = "send(item); cleanup(item);"
+
+        def body(name, statements):
+            return f"function {name}() {{ {statements} }}"
+
+        self.write("a.ts", body("first", long))
+        self.write("b.ts", body("second", long))
+        self.write(BASELINE, '{"scoring_version":1,"entries":[]}')
+        self.assertEqual(self.invoke(1)[0]["findings"][0]["status"], "blocking")
+        baseline, raw = self.invoke(0, "baseline")
+        self.assertEqual(len(baseline["duplication_entries"]), 1)
+        entry, = baseline["duplication_entries"]
+        self.assertEqual(([item["path"] for item in entry["occurrences"]], entry["score"]),
+                         (["a.ts", "b.ts"], 15))
+        self.write(BASELINE, raw.decode())
+
+        def statuses(code):
+            return [(item["score"], item["status"]) for item in self.invoke(code)[0]["findings"]]
+
+        self.assertEqual(statuses(0), [(15, "baselined")])
+        self.write("b.ts", "// unrelated\n\n" + body("second", shorter))
+        self.assertEqual(statuses(0), [(10, "baselined")])
+        for path, name in (("a.ts", "first"), ("b.ts", "second")):
+            self.write(path, body(name, long + " verify(item);"))
+        self.assertEqual(statuses(1), [(20, "blocking")])
+        for path, name in (("a.ts", "first"), ("b.ts", "second")):
+            self.write(path, body(name, long.replace("item", "other")))
+        self.assertEqual(statuses(1), [(15, "blocking")])
+
+        self.write("a.ts", body("first", long))
+        self.write("b.ts", body("second", long))
+        self.write("c.ts", body("third", shorter))
+        self.assertEqual(statuses(1), [(15, "baselined"), (10, "blocking"), (10, "blocking")])
+        (self.root / "c.ts").unlink()
+        self.write("b.ts", body("second", long) + body("second", "unrelated();"))
+        self.assertEqual(statuses(1), [(15, "blocking")])
+        (self.root / "b.ts").rename(self.root / "moved.ts")
+        self.write("moved.ts", body("second", long))
+        self.assertEqual(statuses(1), [(15, "blocking")])
+        self.write("moved.ts", body("other", long + " different(); " + shorter))
+        self.invoke(1)
+
+    def test_source_duplication_consolidates_repeated_runs(self):
+        self.duplication(minimum=20)
+        self.write("copies.ts", "function both() {" + "ping();" * 2000 + "}")
+        report, _ = self.invoke(0)
+        self.assertLess(len(report["findings"]), 20)
+        largest = max(report["findings"], key=lambda item: item["score"])
+        self.assertEqual(largest["score"], 4000)
+        self.assertEqual(largest["occurrences"][0]["range"]["end"],
+                         largest["occurrences"][1]["range"]["start"])
+        self.write("exhausted.ts", "function repeat() {" + "ping();" * 30000 + "}")
+        report, _ = self.invoke(2)
+        self.assertIn("duplication_limit", [item["kind"] for item in report["diagnostics"]])
+        self.assertEqual(self.invoke(2, "baseline")[1], b"")
+
+    def test_source_duplication_configuration_and_failed_parse(self):
+        self.config(limits={}, duplication={})
+        self.write("a.ts", "function a() {" + "unique();" * 13 + "}")
+        self.write("b.tsx", "function b() {" + "unique();" * 13 + "}")
+        report, _ = self.invoke(0)
+        largest = max(report["findings"], key=lambda item: item["score"])
+        self.assertEqual((largest["score"], largest["limit"]), (52, 50))
+        self.config(limits={}, duplication={"minimum_tokens": 0})
+        self.assertEqual(self.invoke(2, "validate")[0]["diagnostics"][0]["kind"], "invalid_config")
+        self.duplication()
+        self.write("broken.tsx", "const malformed = <main>")
+        self.assertIn("parse_error", [item["kind"] for item in self.invoke(2)[0]["diagnostics"]])
+
     def test_mixed_fixtures_match_hand_scored_contract(self):
         shutil.copytree(HERE / "fixtures/mixed", self.root, dirs_exist_ok=True)
         report, raw = self.invoke(0)

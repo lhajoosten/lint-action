@@ -1,6 +1,6 @@
-use crate::cognitive;
 use crate::grammar::{Decision, Language, Scope};
 use crate::model::{Callable, Diagnostic, ErrorKind, Identity, Rule};
+use crate::{cognitive, duplication};
 use std::collections::BTreeMap;
 use tree_sitter::{Node, Parser};
 
@@ -9,6 +9,7 @@ pub struct Analysis {
     pub callables: Vec<Callable>,
     pub diagnostics: Vec<Diagnostic>,
     pub scope_counts: BTreeMap<Identity, usize>,
+    pub duplication: Vec<duplication::Source>,
 }
 
 struct Frame {
@@ -17,7 +18,12 @@ struct Frame {
     depth: u32,
 }
 
-pub fn analyze(path: &str, language: Language, source: &str) -> Result<Analysis, Diagnostic> {
+pub fn analyze(
+    path: &str,
+    language: Language,
+    source: &str,
+    duplication_budget: Option<(usize, usize)>,
+) -> Result<Analysis, Diagnostic> {
     let parser_error =
         |message: &str| Diagnostic::new(ErrorKind::ParseError, Some(path.to_owned()), message);
     let mut parser = Parser::new();
@@ -29,6 +35,7 @@ pub fn analyze(path: &str, language: Language, source: &str) -> Result<Analysis,
         .ok_or_else(|| parser_error("Tree-sitter returned no syntax tree"))?;
 
     let mut result = Analysis::default();
+    let mut duplicate_source = duplication_budget.map(|_| duplication::Source::new(path));
     let mut scope = Vec::<Scope>::new();
     let cognitive = Rule::CognitiveComplexity.supports(language);
     let mut active = Vec::<Frame>::new();
@@ -95,11 +102,22 @@ pub fn analyze(path: &str, language: Language, source: &str) -> Result<Analysis,
             }
         }
 
+        if let Some(collector) = duplicate_source.as_mut() {
+            collector.enter(node, source, language, &scope);
+            let (tokens, bytes) = duplication_budget.expect("collector has a budget");
+            if collector.tokens > tokens || collector.bytes > bytes {
+                result.diagnostics.push(duplication::resource_limit());
+                duplicate_source = None;
+            }
+        }
         entries.push((entered_scope, is_callable, nested));
         if cursor.goto_first_child() {
             continue;
         }
         loop {
+            if let Some(collector) = duplicate_source.as_mut() {
+                collector.exit(cursor.node());
+            }
             let (entered_scope, is_callable, nested) = entries.pop().expect("cursor has an entry");
             if entered_scope {
                 scope.pop();
@@ -117,9 +135,15 @@ pub fn analyze(path: &str, language: Language, source: &str) -> Result<Analysis,
                 break;
             }
             if !cursor.goto_parent() {
-                if !result.diagnostics.is_empty() {
+                if result
+                    .diagnostics
+                    .iter()
+                    .any(|error| error.kind == ErrorKind::ParseError)
+                {
                     result.callables.clear();
                     result.scope_counts.clear();
+                } else {
+                    result.duplication.extend(duplicate_source);
                 }
                 return Ok(result);
             }

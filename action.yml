@@ -1,5 +1,5 @@
 name: lint-action
-description: Run the Tree-sitter complexity quality gate on a checked-out repository
+description: Run the Tree-sitter quality gate on a checked-out repository
 inputs:
   repository:
     description: Path to the repository relative to GITHUB_WORKSPACE
