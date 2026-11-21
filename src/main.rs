@@ -355,7 +355,7 @@ fn main() -> ExitCode {
     match run(Cli::parse().command) {
         Ok(status) => status.into(),
         Err(error) => {
-            eprintln!("lint-action: could not write JSON: {error}");
+            eprintln!("lint-gate: could not write JSON: {error}");
             2.into()
         }
     }

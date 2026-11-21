@@ -28,7 +28,7 @@ jobs:
       RELEASE_LOG_CONFIGURATION: &release_config |-
         {
           "schemaVersion": 2,
-          "repository": "lhajoosten/lint-action",
+          "repository": "${{ github.repository }}",
           "repositoryId": 1466479881,
           "releaseBranch": "main",
           "releasePolicy": "release-policy-v1",
