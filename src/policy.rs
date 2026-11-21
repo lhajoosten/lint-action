@@ -1,5 +1,5 @@
 use crate::grammar::Language;
-use crate::model::{Callable, Diagnostic, ErrorKind, Identity, SCORING_VERSION};
+use crate::model::{Callable, Diagnostic, ErrorKind, Identity, Rule, SCORING_VERSION};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::BTreeMap;
@@ -10,6 +10,7 @@ use std::path::{Component, Path};
 pub const CONFIG_FILE: &str = ".lint-action.json";
 pub const BASELINE_FILE: &str = ".lint-action-baseline.json";
 pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const DEFAULT_LIMIT: u32 = 12;
 const MAX_BASELINE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -24,7 +25,10 @@ pub enum Mode {
 #[serde(deny_unknown_fields)]
 struct Config {
     mode: Mode,
+    #[serde(default = "default_limits")]
     limits: BTreeMap<Language, u32>,
+    #[serde(default)]
+    cognitive_limits: BTreeMap<Language, u32>,
     #[serde(default = "all_paths")]
     include: Vec<String>,
     #[serde(default)]
@@ -34,6 +38,7 @@ struct Config {
 pub struct Policy {
     pub mode: Mode,
     limits: BTreeMap<Language, u32>,
+    cognitive_limits: BTreeMap<Language, u32>,
     include: GlobSet,
     exclude: GlobSet,
 }
@@ -47,19 +52,41 @@ impl Policy {
                 "limits must enable at least one language and be positive".into(),
             ));
         }
+        for (&language, &limit) in &config.cognitive_limits {
+            if limit == 0
+                || !Rule::CognitiveComplexity.supports(language)
+                || !config.limits.contains_key(&language)
+            {
+                return Err(invalid(
+                    "cognitive_limits requires positive limits for enabled TypeScript or TSX"
+                        .into(),
+                ));
+            }
+        }
         if config.include.is_empty() {
             return Err(invalid("include must contain at least one glob".into()));
         }
         Ok(Self {
             mode: config.mode,
             limits: config.limits,
+            cognitive_limits: config.cognitive_limits,
             include: compile_globs(&config.include).map_err(invalid)?,
             exclude: compile_globs(&config.exclude).map_err(invalid)?,
         })
     }
 
-    pub fn limit(&self, language: Language) -> Option<u32> {
-        self.limits.get(&language).copied()
+    pub fn limit(&self, language: Language, rule: Rule) -> Option<u32> {
+        let cyclomatic_limit = self.limits.get(&language).copied()?;
+        match rule {
+            Rule::CyclomaticComplexity => Some(cyclomatic_limit),
+            Rule::CognitiveComplexity if rule.supports(language) => Some(
+                self.cognitive_limits
+                    .get(&language)
+                    .copied()
+                    .unwrap_or(DEFAULT_LIMIT),
+            ),
+            Rule::CognitiveComplexity => None,
+        }
     }
 
     pub fn includes(&self, path: &Path) -> bool {
@@ -72,6 +99,18 @@ impl Policy {
                 .exclude
                 .is_match(format!("{}/", path.to_string_lossy()))
     }
+}
+
+fn default_limits() -> BTreeMap<Language, u32> {
+    [
+        Language::Rust,
+        Language::Typescript,
+        Language::Tsx,
+        Language::Python,
+    ]
+    .into_iter()
+    .map(|language| (language, DEFAULT_LIMIT))
+    .collect()
 }
 
 fn all_paths() -> Vec<String> {
@@ -110,11 +149,13 @@ pub struct Baseline {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Entry {
+    #[serde(default)]
+    rule: Rule,
     identity: Identity,
-    score: u32,
+    score: u64,
 }
 
-pub type BaselineScores = BTreeMap<Identity, Option<u32>>;
+pub type BaselineScores = BTreeMap<Rule, BTreeMap<Identity, Option<u64>>>;
 
 impl Baseline {
     pub fn load(path: &Path) -> Result<BaselineScores, Diagnostic> {
@@ -126,12 +167,18 @@ impl Baseline {
                 baseline.scoring_version
             )));
         }
-        let mut scores = BTreeMap::new();
-        for Entry { identity, score } in baseline.entries {
+        let mut scores = BaselineScores::new();
+        for Entry {
+            rule,
+            identity,
+            score,
+        } in baseline.entries
+        {
             let source_path = Path::new(&identity.path);
             if !normal_relative_path(source_path)
                 || slash_path(source_path).as_deref() != Some(&identity.path)
                 || Language::from_path(source_path) != Some(identity.language)
+                || !rule.supports(identity.language)
                 || identity.scope.is_empty()
                 || identity
                     .scope
@@ -145,6 +192,8 @@ impl Baseline {
                 )));
             }
             scores
+                .entry(rule)
+                .or_default()
                 .entry(identity)
                 .and_modify(|value| *value = None)
                 .or_insert(Some(score));
@@ -155,11 +204,13 @@ impl Baseline {
     pub fn generate<'a>(callables: impl Iterator<Item = &'a Callable>) -> Self {
         let mut entries: Vec<_> = callables
             .map(|callable| Entry {
+                rule: callable.rule,
                 identity: callable.identity.clone(),
                 score: callable.score,
             })
             .collect();
-        entries.sort_by(|left, right| left.identity.cmp(&right.identity));
+        entries
+            .sort_by(|left, right| (&left.identity, left.rule).cmp(&(&right.identity, right.rule)));
         Self {
             scoring_version: SCORING_VERSION,
             entries,

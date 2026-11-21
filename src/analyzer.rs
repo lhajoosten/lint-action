@@ -1,5 +1,6 @@
+use crate::cognitive;
 use crate::grammar::{Decision, Language, Scope};
-use crate::model::{Callable, Diagnostic, ErrorKind, Identity};
+use crate::model::{Callable, Diagnostic, ErrorKind, Identity, Rule};
 use std::collections::BTreeMap;
 use tree_sitter::{Node, Parser};
 
@@ -8,6 +9,12 @@ pub struct Analysis {
     pub callables: Vec<Callable>,
     pub diagnostics: Vec<Diagnostic>,
     pub scope_counts: BTreeMap<Identity, usize>,
+}
+
+struct Frame {
+    cyclomatic_index: usize,
+    cognitive_index: Option<usize>,
+    depth: u32,
 }
 
 pub fn analyze(path: &str, language: Language, source: &str) -> Result<Analysis, Diagnostic> {
@@ -23,7 +30,8 @@ pub fn analyze(path: &str, language: Language, source: &str) -> Result<Analysis,
 
     let mut result = Analysis::default();
     let mut scope = Vec::<Scope>::new();
-    let mut active = Vec::<usize>::new();
+    let cognitive = Rule::CognitiveComplexity.supports(language);
+    let mut active = Vec::<Frame>::new();
     let mut entries = Vec::new();
     let mut cursor = tree.walk();
     loop {
@@ -53,30 +61,57 @@ pub fn analyze(path: &str, language: Language, source: &str) -> Result<Analysis,
             };
             *result.scope_counts.entry(identity.clone()).or_default() += 1;
             if is_callable {
-                active.push(result.callables.len());
-                result.callables.push(Callable {
-                    identity,
-                    name,
-                    range: node.range().into(),
-                    score: 1,
+                active.push(Frame {
+                    cyclomatic_index: result.callables.len(),
+                    cognitive_index: cognitive.then_some(result.callables.len() + 1),
+                    depth: 0,
                 });
+                let rules = [Rule::CyclomaticComplexity, Rule::CognitiveComplexity];
+                for rule in rules.into_iter().filter(|rule| rule.supports(language)) {
+                    result.callables.push(Callable {
+                        rule,
+                        identity: identity.clone(),
+                        name: name.clone(),
+                        range: node.range().into(),
+                        score: u64::from(rule == Rule::CyclomaticComplexity),
+                        contributions: Vec::new(),
+                    });
+                }
             }
         }
-        if let Some(&index) = active.last() {
-            result.callables[index].score += decision_points(language, node);
+        let mut nested = false;
+        if let Some(frame) = active.last_mut() {
+            result.callables[frame.cyclomatic_index].score +=
+                u64::from(decision_points(language, node));
+            if let Some(index) = frame.cognitive_index {
+                nested = !is_callable && cognitive::enters_nested_flow(node);
+                frame.depth += u32::from(nested);
+                let metric = &mut result.callables[index];
+                metric.score += u64::from(cognitive::score(
+                    node,
+                    frame.depth,
+                    &mut metric.contributions,
+                ));
+            }
         }
 
-        entries.push((entered_scope, is_callable));
+        entries.push((entered_scope, is_callable, nested));
         if cursor.goto_first_child() {
             continue;
         }
         loop {
-            let (entered_scope, is_callable) = entries.pop().expect("cursor has an entry");
+            let (entered_scope, is_callable, nested) = entries.pop().expect("cursor has an entry");
             if entered_scope {
                 scope.pop();
             }
             if is_callable {
                 active.pop();
+            }
+            if nested {
+                active
+                    .last_mut()
+                    .expect("nesting is inside a callable")
+                    .depth -= 1;
             }
             if cursor.goto_next_sibling() {
                 break;

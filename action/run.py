@@ -131,8 +131,16 @@ def render(report, code, relative_repository):
         for item in findings:
             if item["status"] != status:
                 continue
-            message = (f'{item["name"]} has cyclomatic complexity {item["score"]} '
+            rule = item["rule"].replace("-", " ")
+            message = (f'{item["name"]} has {rule} {item["score"]} '
                        f'(limit {item["limit"]}, {status})')
+            contributions = sorted(item.get("contributions", []), key=lambda part: -part["points"])
+            if contributions:
+                details = ", ".join(
+                    f'+{part["points"]} {part["construct"]} at line {part["range"]["start"]["line"]}'
+                    for part in contributions[:3]
+                )
+                message += f". Largest contributions: {details}"
             messages.append(("error" if status == "blocking" else "warning",
                              message, item["path"], item["range"]["start"]))
     for level, message, path, location in messages[:ANNOTATION_LIMIT]:

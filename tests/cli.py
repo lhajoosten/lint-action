@@ -118,6 +118,114 @@ class CliTests(unittest.TestCase):
         self.assertEqual(anonymous["range"]["start"]["column"],
                          len('const é = "if && ??"; consume('.encode("utf-8")) + 1)
 
+    def test_cognitive_nesting_and_callable_boundaries(self):
+        self.config(limits={"typescript": 1, "tsx": 1},
+                    cognitive_limits={"typescript": 1, "tsx": 1})
+        self.write("scopes.ts", """function nested(a: boolean, b: boolean) {
+    if (a) { if (b) work(); }
+}
+function guards(a: boolean, b: boolean) {
+    if (!a) return;
+    if (!b) return;
+    work();
+}
+function host(a: boolean) {
+    if (a) {
+        consume(() => { if (a) { if (a) work(); } });
+    }
+}\n""")
+        self.write("view.tsx", """const view = () => <p>{ok ? (small ? "s" : "m") : "l"}</p>;
+""")
+        report, _ = self.invoke(0)
+        self.assertEqual(report["diagnostics"], [])
+        cognitive = [item for item in report["findings"] if item["rule"] == "cognitive-complexity"]
+        self.assertEqual([(item["name"], item["score"]) for item in cognitive],
+                         [("nested", 3), ("guards", 2), ("<anonymous>", 3), ("view", 3)])
+        contributions = cognitive[0]["contributions"]
+        self.assertEqual([(p["construct"], p["points"], p["nesting"]) for p in contributions],
+                         [("if", 1, 0), ("if", 2, 1)])
+        self.assertEqual(contributions[1]["range"]["start"], {"line": 2, "column": 14})
+        cyclomatic = [item for item in report["findings"] if item["rule"] == "cyclomatic-complexity"]
+        self.assertEqual([(item["name"], item["score"]) for item in cyclomatic[:2]],
+                         [("nested", 3), ("guards", 3)])
+
+    def test_cognitive_control_flow_and_logical_runs(self):
+        self.config(limits={"typescript": 100}, cognitive_limits={"typescript": 1})
+        self.write("flow.ts", """function example(a: any, b: any, c: any, d: any, e: any) {
+    if (a && (b && c) || d) {
+        outer: for (const item of e) {
+            if (item?.x ?? false) break outer;
+        }
+    } else if (b) {
+        while (c) break;
+    } else {
+        try {
+            switch (a) {
+                case 0: return b ? 0 : 1;
+                case 1: return 2;
+                default: return 3;
+            }
+        } catch {
+            if (c) throw c;
+        } finally {
+            return;
+        }
+    }
+}\n""")
+        report, _ = self.invoke(0)
+        self.assertEqual(report["diagnostics"], [])
+        finding, = report["findings"]
+        expected = [
+            ("if", 1), ("&&", 1), ("||", 1), ("for", 2), ("if", 3), ("??", 1),
+            ("labeled break", 1), ("else if", 1), ("while", 2), ("else", 1),
+            ("switch", 2), ("ternary", 3), ("catch", 2), ("if", 3),
+        ]
+        self.assertEqual([(p["construct"], p["points"]) for p in finding["contributions"]], expected)
+        self.assertEqual(finding["score"], 24)
+
+    def test_both_defaults_are_twelve_and_overrides_are_independent(self):
+        branches = "if (x) work();"
+        self.write("limits.ts",
+                   f"function cyclo_equal() {{ {branches * 11} }}\n"
+                   f"function cognitive_equal() {{ {branches * 12} }}\n"
+                   f"function both_over() {{ {branches * 13} }}\n")
+        self.write(POLICY, '{"mode": "strict"}')
+        report, _ = self.invoke(1)
+        self.assertEqual([(f["name"], f["rule"], f["score"], f["limit"]) for f in report["findings"]],
+                         [("cognitive_equal", "cyclomatic-complexity", 13, 12),
+                          ("both_over", "cyclomatic-complexity", 14, 12),
+                          ("both_over", "cognitive-complexity", 13, 12)])
+        self.config("strict", {"typescript": 100})
+        report, _ = self.invoke(1)
+        self.assertEqual([(f["rule"], f["limit"]) for f in report["findings"]],
+                         [("cognitive-complexity", 12)])
+        self.write(POLICY, '{"mode": "strict", "cognitive_limits": {"typescript": 100}}')
+        report, _ = self.invoke(1)
+        self.assertEqual([(f["rule"], f["limit"]) for f in report["findings"]],
+                         [("cyclomatic-complexity", 12)] * 2)
+        for invalid in ({"typescript": 0}, {"python": 12}, {"tsx": 12}):
+            self.config(limits={"typescript": 12}, cognitive_limits=invalid)
+            self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "invalid_config")
+
+    def test_baseline_exceptions_are_per_rule(self):
+        self.config("baseline", {"typescript": 1}, cognitive_limits={"typescript": 1})
+        self.write("debt.ts", "function debt() { if (a) { if (b) work(); } }")
+        baseline, _ = self.invoke(0, "baseline")
+        cyclomatic, cognitive = baseline["entries"]
+        self.assertEqual([cyclomatic["rule"], cognitive["rule"]],
+                         ["cyclomatic-complexity", "cognitive-complexity"])
+        self.assertEqual(cyclomatic["identity"], cognitive["identity"])
+        for entries, code, expected in (
+            ([cyclomatic, cognitive], 0, ["baselined", "baselined"]),
+            ([{key: value for key, value in cyclomatic.items() if key != "rule"}],
+             1, ["baselined", "blocking"]),
+            ([cognitive], 1, ["blocking", "baselined"]),
+            ([cyclomatic, cyclomatic, cognitive], 1, ["blocking", "baselined"]),
+        ):
+            self.write(BASELINE, json.dumps({**baseline, "entries": entries}))
+            report, _ = self.invoke(code)
+            self.assertEqual([f["status"] for f in report["findings"]], expected)
+
     def test_strict_threshold_and_selection(self):
         self.write("src/choices.ts", "const choose = (x: boolean) => x ? 1 : 0;")
         self.write("src/also.tsx", "this is invalid TSX")
@@ -184,6 +292,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "invalid_baseline")
         baseline, _ = self.invoke(0, "baseline")
         self.assertEqual(baseline["entries"], [{
+            "rule": "cyclomatic-complexity",
             "identity": {"path": "debt.py", "language": "python",
                          "scope": [{"kind": "function", "name": "f"}]},
             "score": 3,
