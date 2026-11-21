@@ -1,4 +1,4 @@
-name: Rolling release
+name: Rolling Release
 
 on:
   pull_request_target:
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   preview:
-    name: Preview with Release Log latest
+    name: Preview with Rolling Release latest
     if: >-
       github.event.pull_request.merged == true &&
       vars.RELEASE_APP_ID != '' &&
@@ -100,7 +100,7 @@ jobs:
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_LOG_PRIVATE_KEY }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY || secrets.RELEASE_LOG_PRIVATE_KEY }}
           permission-contents: read
           permission-pull-requests: read
 
@@ -139,4 +139,4 @@ jobs:
       write: ${{ github.event_name != 'workflow_dispatch' }}
       configuration: *release_config
     secrets:
-      app-private-key: ${{ secrets.RELEASE_LOG_PRIVATE_KEY }}
+      app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY || secrets.RELEASE_LOG_PRIVATE_KEY }}
