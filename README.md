@@ -58,7 +58,29 @@ Use `lint-gate validate --root /path/to/project` to check candidate policy and i
 
 ## Add to a workflow
 
-GitHub-hosted Ubuntu 24.04 x64 is the initial runner target. Add the step after checkout in an existing job on `pull_request` or `push`. Pin the Action to a reviewed full commit SHA. The job needs `contents: read` to check out its repository. The analyzer uses no repository credentials or project build. The Action builds the pinned analyzer and grammars using Cargo.
+For an independent check on GitHub-hosted Ubuntu, put this caller in `.github/workflows/source-complexity.yml`. Replace the reference with a reviewed full commit SHA containing the reusable workflow. Choose the triggers for your repository and check in `.lint-action.json` with `"mode": "report-only"` for advisory onboarding.
+
+```yaml
+name: Source complexity
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  complexity:
+    uses: lhajoosten/lint-gate/.github/workflows/source-complexity.yml@<reviewed-full-commit-sha>
+```
+
+The reusable workflow has read-only repository access, checks out the candidate without persisting credentials, and uses the PR base policy. The first PR that adds the policy can bootstrap it without scanning against a missing base policy. A push or dispatch checks the selected revision. Disable **Source complexity** in Actions to pause this caller.
+
+To integrate the composite Action directly with an existing job, add it after checkout. Pin it to a reviewed full commit SHA. The analyzer uses no repository credentials or project build. The Action builds the pinned analyzer and grammars using Cargo.
 
 ```yaml
 permissions:
