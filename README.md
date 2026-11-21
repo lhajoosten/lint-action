@@ -92,6 +92,10 @@ To reproduce PR results, materialize the base policy and its baseline in a tempo
 
 See the [cyclomatic scoring contract](docs/rules/cyclomatic-complexity.md), the [cognitive scoring contract](docs/rules/cognitive-complexity.md), and the [Release Log pilot](docs/release-log-pilot.md).
 
+## Rolling Release
+
+Configure `RELEASE_APP_ID` and `RELEASE_BOT_USER_ID` as Actions variables and `RELEASE_APP_PRIVATE_KEY` as an Actions secret. The existing `RELEASE_LOG_PRIVATE_KEY` secret is accepted as a fallback. Merged pull requests get a read-only preview and a separate, pinned release writer. Set `RELEASE_LOG_WRITE_ENABLED=false` to pause writes. Manual dispatch runs the read-only preflight.
+
 ## Maintain the rules
 
 Language mappings live in `src/grammar.rs`. An adapter maps a grammar to callable scopes, named containers, and typed cyclomatic decision points. TypeScript cognitive scoring lives in `src/cognitive.rs`. `src/analyzer.rs` owns tree traversal and decision attribution, while `src/model.rs` defines common diagnostics and locations. Keep new rule behavior independent of CLI and Action output. Add a source fixture with hand-calculated scores and assert the observable result through the CLI. Review the rule reference and scoring version when changing the contract.
