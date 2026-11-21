@@ -25,12 +25,12 @@ jobs:
           cargo +1.88.0 package --locked
           package_version=$(cargo +1.88.0 metadata --locked --no-deps --format-version 1 |
             python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')
-          package_dir="$PWD/target/package/lint-action-$package_version"
+          package_dir="$PWD/target/package/lint-gate-$package_version"
           cargo +1.88.0 build --locked --release --manifest-path "$package_dir/Cargo.toml"
-          export LINT_ACTION_BIN="$package_dir/target/release/lint-action"
+          export LINT_GATE_BIN="$package_dir/target/release/lint-gate"
           python3 tests/cli.py
           python3 tests/action_test.py
-          revision=$(python3 tests/action_fixture.py build "$GITHUB_WORKSPACE" "$LINT_ACTION_BIN")
+          revision=$(python3 tests/action_fixture.py build "$GITHUB_WORKSPACE" "$LINT_GATE_BIN")
           printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
         id: prepare
       - name: Accept unchanged legacy debt

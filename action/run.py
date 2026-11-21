@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 
-CHECK = "lint-action quality gate"
+CHECK = "lint-gate quality gate"
 CONFIG = ".lint-action.json"
 BASELINE = ".lint-action-baseline.json"
 ANNOTATION_LIMIT = 10
@@ -76,7 +76,7 @@ def copy_base_policy(repository, revision, directory):
 
 
 def repository_path(workspace):
-    selection = Path(os.environ.get("LINT_ACTION_REPOSITORY", "."))
+    selection = Path(os.environ.get("LINT_GATE_REPOSITORY", "."))
     repository = (workspace / selection).resolve()
     if selection.is_absolute() or not repository.is_relative_to(workspace) or not repository.is_dir():
         raise ValueError("repository must be a directory within GITHUB_WORKSPACE")
@@ -87,8 +87,8 @@ def trusted_directory(workspace, repository, temporary):
     event = os.environ.get("GITHUB_EVENT_NAME", "")
     if event == "pull_request_target":
         raise ValueError("use the pull_request event for candidate source analysis")
-    directory_input = os.environ.get("LINT_ACTION_POLICY_DIRECTORY")
-    revision = os.environ.get("LINT_ACTION_POLICY_REF")
+    directory_input = os.environ.get("LINT_GATE_POLICY_DIRECTORY")
+    revision = os.environ.get("LINT_GATE_POLICY_REF")
     if directory_input:
         if revision:
             raise ValueError("policy-directory and policy-ref are mutually exclusive")
@@ -100,7 +100,7 @@ def trusted_directory(workspace, repository, temporary):
             if path.resolve().is_relative_to(workspace):
                 raise ValueError("policy-directory and its policy files must be outside GITHUB_WORKSPACE")
         return directory
-    revision = revision or os.environ.get("LINT_ACTION_PR_BASE")
+    revision = revision or os.environ.get("LINT_GATE_PR_BASE")
     if event in ("pull_request", "pull_request_review", "pull_request_review_comment") and not revision:
         raise ValueError("pull request base SHA is unavailable")
     if revision:
@@ -183,14 +183,14 @@ def main(binary):
     try:
         workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
         repository = repository_path(workspace)
-        with tempfile.TemporaryDirectory(prefix="lint-action-policy-", dir=os.environ["RUNNER_TEMP"]) as directory:
+        with tempfile.TemporaryDirectory(prefix="lint-gate-policy-", dir=os.environ["RUNNER_TEMP"]) as directory:
             policy = trusted_directory(workspace, repository, Path(directory))
             command = [binary, "scan", "--root", repository, "--config", policy / CONFIG]
             result = subprocess.run(command, capture_output=True, check=False)
         if result.returncode not in (0, 1, 2):
-            raise ValueError(f"lint-action process exited unexpectedly ({result.returncode})")
+            raise ValueError(f"lint-gate process exited unexpectedly ({result.returncode})")
         report = json.loads(result.stdout)
-        with tempfile.NamedTemporaryFile(prefix="lint-action-report-", suffix=".json",
+        with tempfile.NamedTemporaryFile(prefix="lint-gate-report-", suffix=".json",
                                          dir=os.environ["RUNNER_TEMP"], delete=False) as output:
             output.write(result.stdout)
         append_env_file("GITHUB_OUTPUT", f"report={output.name}\n")

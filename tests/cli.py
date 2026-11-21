@@ -1,4 +1,4 @@
-"""Black-box checks for the packaged lint-action executable."""
+"""Black-box checks for the packaged lint-gate executable."""
 
 import json
 import os
@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parent
-BIN = Path(os.environ["LINT_ACTION_BIN"]).resolve()
+BIN = Path(os.environ["LINT_GATE_BIN"]).resolve()
 POLICY = ".lint-action.json"
 BASELINE = ".lint-action-baseline.json"
 

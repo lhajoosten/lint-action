@@ -11,7 +11,7 @@ import unittest
 from action_fixture import BASELINE, CONFIG, build, git, verify
 
 PROJECT = Path(__file__).resolve().parent.parent
-BIN = Path(os.environ["LINT_ACTION_BIN"]).resolve()
+BIN = Path(os.environ["LINT_GATE_BIN"]).resolve()
 
 
 DUPLICATION_MESSAGE = (
@@ -28,9 +28,9 @@ class ActionTests(unittest.TestCase):
             revision = build(workspace, BIN)
             env = {
                 **os.environ,
-                "LINT_ACTION_PR_BASE": revision,
-                "LINT_ACTION_POLICY_REF": "",
-                "LINT_ACTION_POLICY_DIRECTORY": "",
+                "LINT_GATE_PR_BASE": revision,
+                "LINT_GATE_POLICY_REF": "",
+                "LINT_GATE_POLICY_DIRECTORY": "",
                 "GITHUB_EVENT_NAME": "pull_request",
                 "GITHUB_WORKSPACE": str(workspace),
                 "RUNNER_TEMP": directory,
@@ -39,7 +39,7 @@ class ActionTests(unittest.TestCase):
             }
             reports = []
             for name, code in (("pass", 0), ("fail", 1)):
-                env["LINT_ACTION_REPOSITORY"] = f"action-fixture-{name}"
+                env["LINT_GATE_REPOSITORY"] = f"action-fixture-{name}"
                 process = subprocess.run(
                     [sys.executable, "-I", PROJECT / "action/run.py", BIN],
                     env=env, capture_output=True, text=True, check=False,
@@ -56,7 +56,7 @@ class ActionTests(unittest.TestCase):
                     )
                     self.assertIn("nested has cognitive complexity 3 (limit 1, blocking)", process.stdout)
                 else:
-                    self.assertIn("::warning title=lint-action quality gate,file=action-fixture-pass/legacy.ts",
+                    self.assertIn("::warning title=lint-gate quality gate,file=action-fixture-pass/legacy.ts",
                                   process.stdout)
             verify(*reports)
             summary = Path(env["GITHUB_STEP_SUMMARY"]).read_text()
@@ -65,7 +65,7 @@ class ActionTests(unittest.TestCase):
             self.assertIn("Baselined: 1 · Blocking: 4", summary)
             self.assertIn(DUPLICATION_MESSAGE, summary)
 
-            failing = workspace / env["LINT_ACTION_REPOSITORY"]
+            failing = workspace / env["LINT_GATE_REPOSITORY"]
             candidate_baseline = json.loads((failing / BASELINE).read_bytes())
             self.assertEqual(candidate_baseline["duplication_entries"][0]["score"], 10)
             candidate_policy = failing / CONFIG
@@ -82,7 +82,7 @@ class ActionTests(unittest.TestCase):
             # A candidate cannot provide a baseline absent from the trusted commit.
             git(failing, "rm", "--cached", "--", BASELINE)
             git(failing, "commit", "-qm", "Trusted revision has no baseline")
-            env["LINT_ACTION_PR_BASE"] = git(failing, "rev-parse", "HEAD")
+            env["LINT_GATE_PR_BASE"] = git(failing, "rev-parse", "HEAD")
             process = subprocess.run(
                 [sys.executable, "-I", PROJECT / "action/run.py", BIN],
                 env=env, capture_output=True, text=True, check=False,
@@ -96,7 +96,7 @@ class ActionTests(unittest.TestCase):
             (trusted / CONFIG).write_text(
                 '{"mode":"report-only","limits":{"typescript":1},"cognitive_limits":{"typescript":1}}'
             )
-            env["LINT_ACTION_POLICY_DIRECTORY"] = str(trusted)
+            env["LINT_GATE_POLICY_DIRECTORY"] = str(trusted)
             process = subprocess.run(
                 [sys.executable, "-I", PROJECT / "action/run.py", BIN],
                 env=env, capture_output=True, text=True, check=False,
@@ -107,7 +107,7 @@ class ActionTests(unittest.TestCase):
             self.assertIn("nested has cognitive complexity 3 (limit 1, reported)", process.stdout)
             self.assertIn("Largest contributions: +2 if at line 1", process.stdout)
 
-            env["LINT_ACTION_POLICY_DIRECTORY"] = str(failing)
+            env["LINT_GATE_POLICY_DIRECTORY"] = str(failing)
             process = subprocess.run(
                 [sys.executable, "-I", PROJECT / "action/run.py", BIN],
                 env=env, capture_output=True, text=True, check=False,
