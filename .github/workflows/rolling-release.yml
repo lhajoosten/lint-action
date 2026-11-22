@@ -16,19 +16,23 @@ concurrency:
 
 jobs:
   release:
-    uses: lhajoosten/rolling-release/.github/workflows/consumer-release.yml@f161eeb22e7f049d6420d358b8688cbdbccf893b
+    uses: lhajoosten/rolling-release/.github/workflows/consumer-release.yml@f74198ff778b132dddc5a6440f230fd6b5be8ce8
     with:
       release-branch: main
       app-id: ${{ vars.RELEASE_APP_ID }}
       bot-user-id: ${{ vars.RELEASE_BOT_USER_ID }}
       write-enabled: ${{ vars.RELEASE_LOG_WRITE_ENABLED != 'false' }}
+      replay-history: >-
+        [
+          {"sha":"21662200936919c1df83f9d3ce8fccee42fa3dc4","legacy":false,"digest":"8da2381cb6192ac27729508e6743a402909d2baceda13ba72964c062ffd5311e"}
+        ]
       configuration: >-
         {
           "schemaVersion": 2,
           "repository": "${{ github.repository }}",
           "repositoryId": 1466479881,
           "releaseBranch": "main",
-          "releasePolicy": "release-policy-v1",
+          "releasePolicy": "release-policy-v2",
           "contextPolicy": "required",
           "githubRelease": true,
           "changelog": {
