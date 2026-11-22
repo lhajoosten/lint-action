@@ -23,6 +23,16 @@ Create `.lint-action.json` at the source root. This example reports findings wit
 
 Both complexity rules default to a limit of **12**. Omitting `limits` enables cyclomatic complexity in all supported languages. If supplied, `limits` selects the enabled languages and gives their cyclomatic limits. Cognitive complexity runs for enabled TypeScript and TSX. Set `cognitive_limits` to override either cognitive limit independently.
 
+Set `severities` to override enforcement per stable rule ID. `pass` disables the rule, `warn` reports findings without blocking or using baseline exceptions, and `error` follows the configured mode. Missing entries retain the existing mode behavior, and severity does not enable a rule that is otherwise inactive.
+
+```json
+{
+  "mode": "strict",
+  "limits": {"typescript": 10},
+  "severities": {"cyclomatic-complexity": "error", "cognitive-complexity": "warn"}
+}
+```
+
 ```json
 {
   "mode": "report-only",
@@ -46,6 +56,8 @@ Use `--config /path/to/policy.json` to select another policy. To scan specific f
 | `baseline` | Allows an existing exception when its identity is unique and its score is at or below the recorded score |
 
 Generate a baseline explicitly after reviewing the report. A successful generation writes JSON to stdout. Keep the checked-in baseline intact if generation fails.
+
+Baseline generation records new exceptions for error rules, including in report-only mode. It carries forward existing exceptions for rules set to `warn` or `pass` from the baseline beside the policy file.
 
 ```sh
 lint-gate baseline > .lint-action-baseline.json.new &&
@@ -104,7 +116,7 @@ To reproduce PR results, materialize the base policy and its baseline in a tempo
 
 ## Report contract
 
-`scan` writes JSON with `format_version`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. All findings include a stable rule ID, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by the first occurrence's path and start position, then by rule. Complexity findings retain the source path, language, callable name, scope, and range. Cognitive findings include the scoring contributions. Duplication findings carry two locations in `occurrences`, and `limit` is an inclusive minimum. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, empty scans, and the duplication analysis budget.
+`scan` writes JSON with `format_version: 2`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. All findings include a stable rule ID, severity, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by the first occurrence's path and start position, then by rule. Complexity findings retain the source path, language, callable name, scope, and range. Cognitive findings include the scoring contributions. Duplication findings carry two locations in `occurrences`, and `limit` is an inclusive minimum. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, empty scans, and the duplication analysis budget.
 
 | Exit | Meaning |
 | --- | --- |

@@ -34,7 +34,7 @@ function copy() {
 
 This produces one 10-token finding. Changing an identifier or literal in the shared sequence breaks exact matching at that token. Occurrences can be in one file or different files and cannot share tokens. The matcher grows qualifying runs to their longest non-overlapping extent and consolidates shorter alignments that overlap both ranges of a retained finding.
 
-The JSON report keeps `format_version: 1`. Duplication adds a finding with `rule`, `score`, `limit`, `status`, and exactly two `occurrences`. Each occurrence has a repository-relative `path` and a `range` from the first matched token to the exclusive end of the last one. Columns count one-based UTF-8 bytes. Findings and occurrences have deterministic source order. Annotations and the job summary show both ranges within the existing display limits. JSON contains all findings from a completed scan.
+The JSON report keeps `format_version: 2`. Duplication adds a finding with `rule`, `severity`, `score`, `limit`, `status`, and exactly two `occurrences`. Each occurrence has a repository-relative `path` and a `range` from the first matched token to the exclusive end of the last one. Columns count one-based UTF-8 bytes. Findings and occurrences have deterministic source order. Annotations and the job summary show both ranges within the existing display limits. JSON contains all findings from a completed scan.
 
 ## Rollout and baselines
 

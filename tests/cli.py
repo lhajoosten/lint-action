@@ -169,7 +169,7 @@ function another() { prepare(item); send(item); }
     def test_mixed_fixtures_match_hand_scored_contract(self):
         shutil.copytree(HERE / "fixtures/mixed", self.root, dirs_exist_ok=True)
         report, raw = self.invoke(0)
-        self.assertEqual((report["format_version"], report["scoring_version"]), (1, 1))
+        self.assertEqual((report["format_version"], report["scoring_version"]), (2, 1))
         self.assertEqual((report["files_scanned"], report["files_skipped"]), (4, 2))
         self.assertEqual(report["diagnostics"], [])
         expected = [
@@ -473,6 +473,115 @@ function host(a: boolean) {
         self.assertEqual(baseline["entries"], [])
         self.write(BASELINE, json.dumps(baseline))
         self.assertEqual(self.invoke(1)[0]["findings"][0]["status"], "blocking")
+
+    def test_rule_severity_matrix_and_pass_skips_analysis(self):
+        self.write("flow.ts", "function complex() { if (a) return b; else return c; }")
+        self.write(BASELINE, json.dumps({"scoring_version": 1, "entries": []}))
+        for mode, severity, code, status in (
+            ("report-only", "error", 0, "reported"),
+            ("strict", "error", 1, "blocking"),
+            ("baseline", "error", 1, "blocking"),
+            ("strict", "warn", 0, "reported"),
+            ("baseline", "warn", 0, "reported"),
+            ("report-only", "warn", 0, "reported"),
+        ):
+            self.config(mode, {"typescript": 1}, severities={"cyclomatic-complexity": severity})
+            report, _ = self.invoke(code)
+            finding, = report["findings"]
+            self.assertEqual((finding["severity"], finding["status"]), (severity, status))
+
+        self.config("strict", {"typescript": 1}, severities={
+            "cyclomatic-complexity": "pass", "cognitive-complexity": "pass",
+        })
+        report, _ = self.invoke(0)
+        self.assertEqual((report["findings"], report["diagnostics"]), ([], []))
+        self.assertEqual(report["files_scanned"], 0)
+
+        self.config("strict", {"typescript": 1}, severities={
+            "cyclomatic-complexity": "pass", "cognitive-complexity": "pass",
+            "source-duplication": "warn",
+        })
+        self.assertEqual(self.invoke(0)[0]["findings"], [])
+
+    def test_pass_skips_duplication_budget_and_validation_rejects_bad_severity(self):
+        self.write("copies.ts", "function repeat() {" + "ping();" * 30000 + "}")
+        self.write("complex.ts", "function choose() { return b ? a : c; }")
+        self.config("strict", limits={"typescript": 1}, duplication={}, severities={
+            "cyclomatic-complexity": "warn", "source-duplication": "pass",
+        })
+        report, _ = self.invoke(0)
+        self.assertEqual(report["diagnostics"], [])
+        self.assertEqual(report["files_scanned"], 2)
+        self.assertEqual([item["path"] for item in report["findings"]], ["complex.ts"])
+        self.config("strict", {"typescript": 1}, severities={"cyclomatic-complexity": "invalid"})
+        self.assertEqual(self.invoke(2, "validate")[0]["diagnostics"][0]["kind"], "invalid_config")
+        self.config("strict", {"typescript": 1}, severities={"unknown-rule": "warn"})
+        self.assertEqual(self.invoke(2, "validate")[0]["diagnostics"][0]["kind"], "invalid_config")
+
+    def test_all_pass_validates_explicit_paths_without_walking_directories(self):
+        self.config("strict", limits={"python": 1}, severities={"cyclomatic-complexity": "pass"})
+        inaccessible = self.root / "hidden"
+        inaccessible.mkdir()
+        inaccessible.chmod(0)
+        try:
+            for paths in ((), ("--", "hidden")):
+                report, _ = self.invoke(0, "scan", *paths)
+                self.assertEqual((report["files_scanned"], report["diagnostics"]), (0, []))
+            report, _ = self.invoke(2, "scan", "--", "missing")
+            self.assertEqual(report["diagnostics"][0]["kind"], "unreadable_source")
+        finally:
+            inaccessible.chmod(0o700)
+
+    def test_duplication_token_exhaustion_still_reports_later_parse_errors(self):
+        self.duplication("strict", severities={"source-duplication": "warn"})
+        self.write("a.ts", "function repeat() {" + "ping();" * 210000 + "}")
+        self.write("b.ts", "function (")
+        report, _ = self.invoke(2)
+        self.assertEqual(report["files_scanned"], 2)
+        self.assertEqual([item["kind"] for item in report["diagnostics"]],
+                         ["duplication_limit", "parse_error"])
+
+    def test_warning_preview_and_error_promotion_baseline_generation(self):
+        self.write("flow.ts", "function complex() { if (a) return b; else return c; }")
+        self.config("baseline", {"typescript": 1}, severities={"cyclomatic-complexity": "warn"})
+        empty, raw = self.invoke(0, "baseline")
+        self.assertEqual(empty["entries"], [])
+        self.write(BASELINE, raw.decode())
+        warning = self.invoke(0)[0]["findings"][0]
+        self.assertEqual((warning["severity"], warning["status"]), ("warn", "reported"))
+
+        self.config("baseline", {"typescript": 1}, severities={"cyclomatic-complexity": "error"})
+        self.assertEqual(self.invoke(1)[0]["findings"][0]["status"], "blocking")
+        promoted, raw = self.invoke(0, "baseline")
+        self.assertEqual(len(promoted["entries"]), 1)
+        self.write(BASELINE, raw.decode())
+        finding = self.invoke(0)[0]["findings"][0]
+        self.assertEqual((finding["severity"], finding["status"]), ("error", "baselined"))
+
+    def test_baseline_regeneration_keeps_exceptions_for_pass_and_warn_rules(self):
+        self.write("a.ts", "function a() { if (a) { if (b) run(); } prepare(item); send(item); }")
+        self.write("b.ts", "function b() { prepare(item); send(item); }")
+        limits = {"typescript": 1}
+        cognitive = {"typescript": 1}
+        duplication = {"minimum_tokens": 10}
+        self.config("report-only", limits, cognitive_limits=cognitive, duplication=duplication,
+                    severities={"cognitive-complexity": "warn"})
+        original, raw = self.invoke(0, "baseline")
+        self.assertEqual([item["rule"] for item in original["entries"]], ["cyclomatic-complexity"])
+        self.assertEqual(len(original["duplication_entries"]), 1)
+        self.write(BASELINE, raw.decode())
+
+        self.config("report-only", limits, cognitive_limits=cognitive, duplication=duplication,
+                    severities={"cyclomatic-complexity": "warn", "source-duplication": "pass"})
+        replacement, raw = self.invoke(0, "baseline")
+        self.assertEqual([item["rule"] for item in replacement["entries"]],
+                         ["cyclomatic-complexity", "cognitive-complexity"])
+        self.assertEqual(replacement["entries"][0], original["entries"][0])
+        self.assertEqual(replacement["duplication_entries"], original["duplication_entries"])
+        self.write(BASELINE, raw.decode())
+        self.config("baseline", limits, cognitive_limits=cognitive, duplication=duplication)
+        self.assertEqual([item["status"] for item in self.invoke(0)[0]["findings"]],
+                         ["baselined"] * 3)
 
 
 if __name__ == "__main__":

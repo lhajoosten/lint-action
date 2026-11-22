@@ -10,7 +10,7 @@ use crate::analyzer::Analysis;
 use crate::duplication::{Duplication, Match, Pair};
 use crate::grammar::ANONYMOUS;
 use crate::model::{Callable, Diagnostic, Identity, Position, Rule, SCORING_VERSION};
-use crate::policy::{BASELINE_FILE, Baseline, BaselineScores, CONFIG_FILE, Mode, Policy};
+use crate::policy::{BASELINE_FILE, Baseline, BaselineScores, CONFIG_FILE, Mode, Policy, Severity};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -104,6 +104,7 @@ struct Finding {
     #[serde(flatten)]
     detail: Detail,
     limit: u32,
+    severity: Severity,
     status: Status,
 }
 
@@ -152,7 +153,7 @@ struct Report {
 impl Report {
     fn new() -> Self {
         Self {
-            format_version: 1,
+            format_version: 2,
             scoring_version: SCORING_VERSION,
             mode: None,
             files_scanned: 0,
@@ -217,6 +218,10 @@ fn scan(
     let matches = duplication_matches(&policy, &duplication, &mut diagnostics);
     report.diagnostics = diagnostics;
     for mut callable in callables {
+        let severity = policy.severity(callable.rule);
+        if severity == Severity::Pass {
+            continue;
+        }
         let Some(limit) = policy.limit(callable.identity.language, callable.rule) else {
             continue;
         };
@@ -237,18 +242,32 @@ fn scan(
         report.findings.push(Finding {
             detail: Detail::Complexity(callable),
             limit,
-            status: Status::for_mode(policy.mode, covered),
+            severity,
+            status: if severity == Severity::Warn {
+                Status::Reported
+            } else {
+                Status::for_mode(policy.mode, covered)
+            },
         });
     }
     if let Some(limit) = policy.duplication_minimum {
         let pairs = match_pairs(&matches, &scope_counts);
         for (found, pair) in matches.iter().zip(pairs) {
+            let severity = policy.severity(Rule::SourceDuplication);
+            if severity == Severity::Pass {
+                continue;
+            }
             let covered = policy.mode == Mode::Baseline
                 && pair.is_some_and(|pair| baseline.covers(&pair, found));
             report.findings.push(Finding {
                 detail: Detail::Duplication(found.report()),
                 limit,
-                status: Status::for_mode(policy.mode, covered),
+                severity,
+                status: if severity == Severity::Warn {
+                    Status::Reported
+                } else {
+                    Status::for_mode(policy.mode, covered)
+                },
             });
         }
     }
@@ -280,19 +299,20 @@ fn generate(
         return Ok(None);
     }
     let pairs = match_pairs(&matches, &scope_counts);
-    let baseline = Baseline::generate(
+    let mut baseline = Baseline::generate(
         callables.iter().filter(|callable| {
-            policy
-                .limit(callable.identity.language, callable.rule)
-                .is_some_and(|limit| callable.score > u64::from(limit))
+            policy.severity(callable.rule) == Severity::Error
+                && policy
+                    .limit(callable.identity.language, callable.rule)
+                    .is_some_and(|limit| callable.score > u64::from(limit))
                 && unique(&callable.identity, &scope_counts)
         }),
-        pairs
-            .into_iter()
-            .zip(&matches)
-            .filter_map(|(pair, found)| Some((pair?, found))),
+        pairs.into_iter().zip(&matches).filter_map(|(pair, found)| {
+            (policy.severity(Rule::SourceDuplication) == Severity::Error).then_some((pair?, found))
+        }),
     )?;
-    baseline.to_json().map(Some)
+    baseline.preserve_advisory(&input.config_path().with_file_name(BASELINE_FILE), &policy)?;
+    baseline.into_json().map(Some)
 }
 
 fn duplication_matches<'a>(
@@ -300,7 +320,10 @@ fn duplication_matches<'a>(
     sources: &'a [duplication::Source],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Match<'a>> {
-    if let Some(limit) = policy.duplication_minimum {
+    if let Some(limit) = policy
+        .duplication_minimum
+        .filter(|_| policy.active(Rule::SourceDuplication))
+    {
         match duplication::find(sources, limit as usize) {
             Ok(matches) => return matches,
             Err(diagnostic) => diagnostics.push(diagnostic),

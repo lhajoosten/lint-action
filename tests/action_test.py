@@ -15,7 +15,7 @@ BIN = Path(os.environ["LINT_GATE_BIN"]).resolve()
 
 
 DUPLICATION_MESSAGE = (
-    "source-duplication: 10 shared tokens (minimum 10, blocking) "
+    "error source-duplication: 10 shared tokens (minimum 10, blocking) "
     "at copy.tsx:1:19-1:45 and original.ts:1:23-1:49"
 )
 
@@ -51,10 +51,10 @@ class ActionTests(unittest.TestCase):
                                   + DUPLICATION_MESSAGE, process.stdout)
                     self.assertIn(
                         "file=action-fixture-fail/new%2C%3A%25%0Aname.ts,line=1,col=22"
-                        "::fresh has cyclomatic complexity 2 (limit 1, blocking)",
+                        "::fresh has error cyclomatic complexity 2 (limit 1, blocking)",
                         process.stdout,
                     )
-                    self.assertIn("nested has cognitive complexity 3 (limit 1, blocking)", process.stdout)
+                    self.assertIn("nested has error cognitive complexity 3 (limit 1, blocking)", process.stdout)
                 else:
                     self.assertIn("::warning title=lint-gate quality gate,file=action-fixture-pass/legacy.ts",
                                   process.stdout)
@@ -69,7 +69,10 @@ class ActionTests(unittest.TestCase):
             candidate_baseline = json.loads((failing / BASELINE).read_bytes())
             self.assertEqual(candidate_baseline["duplication_entries"][0]["score"], 10)
             candidate_policy = failing / CONFIG
-            candidate_policy.write_text('{"mode":"report-only","limits":{"typescript":999}}')
+            candidate_policy.write_text(
+                '{"mode":"report-only","limits":{"typescript":999},'
+                '"severities":{"cyclomatic-complexity":"pass","source-duplication":"pass"}}'
+            )
             process = subprocess.run(
                 [sys.executable, "-I", PROJECT / "action/run.py", BIN],
                 env=env, capture_output=True, text=True, check=False,
@@ -94,7 +97,8 @@ class ActionTests(unittest.TestCase):
             trusted = Path(directory) / "trusted"
             trusted.mkdir()
             (trusted / CONFIG).write_text(
-                '{"mode":"report-only","limits":{"typescript":1},"cognitive_limits":{"typescript":1}}'
+                '{"mode":"strict","limits":{"typescript":1},"cognitive_limits":{"typescript":1},'
+                '"severities":{"cyclomatic-complexity":"pass","cognitive-complexity":"warn"}}'
             )
             env["LINT_GATE_POLICY_DIRECTORY"] = str(trusted)
             process = subprocess.run(
@@ -103,9 +107,13 @@ class ActionTests(unittest.TestCase):
             )
             self.assertEqual(process.returncode, 0, process.stdout)
             output = Path(Path(env["GITHUB_OUTPUT"]).read_text().splitlines()[-1][7:])
-            self.assertEqual(json.loads(output.read_bytes())["mode"], "report-only")
-            self.assertIn("nested has cognitive complexity 3 (limit 1, reported)", process.stdout)
+            self.assertEqual(json.loads(output.read_bytes())["mode"], "strict")
+            self.assertIn("::warning title=lint-gate quality gate,file=action-fixture-fail/nested.ts",
+                          process.stdout)
+            self.assertIn("nested has warn cognitive complexity 3 (limit 1, reported)", process.stdout)
             self.assertIn("Largest contributions: +2 if at line 1", process.stdout)
+            self.assertIn("Warning severity: 1 · Error severity: 0",
+                          Path(env["GITHUB_STEP_SUMMARY"]).read_text())
 
             env["LINT_GATE_POLICY_DIRECTORY"] = str(failing)
             process = subprocess.run(
