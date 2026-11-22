@@ -28,6 +28,7 @@ impl Error {
 pub struct GitHub {
     agent: ureq::Agent,
     root: String,
+    base_url: String,
     token: String,
 }
 
@@ -41,20 +42,21 @@ impl GitHub {
             .into();
         Self {
             agent,
-            root: format!("{base_url}/repos/{repository}"),
+            root: format!("{}/repos/{repository}", base_url.trim_end_matches('/')),
+            base_url: base_url.trim_end_matches('/').to_owned(),
             token,
         }
     }
 
     fn request(
         &self,
-        path: &str,
+        url: &str,
         method: &str,
         payload: Option<&Value>,
     ) -> Result<Response<ureq::Body>> {
         let request = Request::builder()
             .method(method)
-            .uri(format!("{}{path}", self.root))
+            .uri(url)
             .header("Authorization", format!("Bearer {}", self.token))
             .header("Accept", "application/vnd.github+json")
             .header("Content-Type", "application/json")
@@ -74,7 +76,26 @@ impl GitHub {
         method: &str,
         payload: Option<&Value>,
     ) -> Result<T> {
-        let mut response = self.request(path, method, payload)?;
+        self.send_to(&self.root, path, method, payload)
+    }
+
+    pub fn api<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        method: &str,
+        payload: Option<&Value>,
+    ) -> Result<T> {
+        self.send_to(&self.base_url, path, method, payload)
+    }
+
+    fn send_to<T: DeserializeOwned>(
+        &self,
+        base: &str,
+        path: &str,
+        method: &str,
+        payload: Option<&Value>,
+    ) -> Result<T> {
+        let mut response = self.request(&format!("{base}{path}"), method, payload)?;
         let status = response.status();
         if !status.is_success() {
             return Err(Error::Status {
@@ -91,10 +112,13 @@ impl GitHub {
         let mut items = Vec::new();
         for page in 1..=20 {
             let value: Value = self.json(&format!("{path}{separator}per_page=100&page={page}"))?;
-            let entries = value[key].as_array().ok_or(Error::Metadata)?;
-            let total = value["total_count"].as_u64().ok_or(Error::Metadata)?;
+            let entries = value
+                .as_array()
+                .or_else(|| value[key].as_array())
+                .ok_or(Error::Metadata)?;
+            let total = value["total_count"].as_u64();
             items.extend(entries.iter().cloned());
-            if entries.len() < 100 || page * 100 >= total {
+            if entries.len() < 100 || total.is_some_and(|total| page * 100 >= total) {
                 return Ok(items);
             }
         }
@@ -102,7 +126,11 @@ impl GitHub {
     }
 
     pub fn artifact(&self, id: u64) -> Result<Vec<u8>> {
-        let response = self.request(&format!("/actions/artifacts/{id}/zip"), "GET", None)?;
+        let response = self.request(
+            &format!("{}/actions/artifacts/{id}/zip", self.root),
+            "GET",
+            None,
+        )?;
         let location = response
             .headers()
             .get("Location")

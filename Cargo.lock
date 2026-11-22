@@ -316,6 +316,7 @@ dependencies = [
  "clap",
  "globset",
  "regex",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",

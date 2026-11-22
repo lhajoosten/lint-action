@@ -1,11 +1,14 @@
 mod common;
 
 use serde_json::{Value, json};
-use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::{
+    fs,
+    process::{Command, Output},
+};
 
 const WORKFLOW: &str = "own-source-complexity.yml";
 const SCANNER: &str = "owner/tool/.github/workflows/source-complexity.yml";
@@ -25,6 +28,13 @@ struct State {
     rejected: bool,
     check: Value,
     writes: Vec<String>,
+    files: Vec<Value>,
+    reviews: Vec<Value>,
+    issue: Value,
+    thread_updates: usize,
+    stop_after_reservation: bool,
+    forbid_threads: bool,
+    reject_review: bool,
 }
 
 impl State {
@@ -49,6 +59,13 @@ impl State {
             rejected: false,
             check: Value::Null,
             writes: Vec::new(),
+            files: Vec::new(),
+            reviews: Vec::new(),
+            issue: Value::Null,
+            thread_updates: 0,
+            stop_after_reservation: false,
+            forbid_threads: false,
+            reject_review: false,
         }
     }
 
@@ -59,6 +76,67 @@ impl State {
         token: &str,
         mut payload: Value,
     ) -> (u16, Value, Option<&'static str>) {
+        if path == "/users/lint-gate%5Bbot%5D" {
+            assert_eq!((method, token), ("GET", "Bearer read-token"));
+            return (
+                200,
+                json!({"login": "lint-gate[bot]", "id": 77, "type": "Bot"}),
+                None,
+            );
+        }
+        if path == "/graphql" {
+            assert_eq!((method, token), ("POST", "Bearer app-token"));
+            if self.forbid_threads {
+                return (
+                    200,
+                    json!({"errors": [{"extensions": {"type": "FORBIDDEN"}}]}),
+                    None,
+                );
+            }
+            let query = payload["query"].as_str().unwrap();
+            let data = if query.contains("mutation") {
+                let id = payload["variables"]["id"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap();
+                let review = self
+                    .reviews
+                    .iter_mut()
+                    .find(|review| review["id"] == id)
+                    .unwrap();
+                review["resolved"] = json!(!query.contains("unresolveReviewThread"));
+                self.thread_updates += 1;
+                json!({})
+            } else {
+                let nodes: Vec<_> = self
+                    .reviews
+                    .iter()
+                    .map(|review| {
+                        json!({
+                            "id": review["id"].to_string(), "isResolved": review["resolved"],
+                            "comments": {"nodes": [{"databaseId": review["id"]}]}
+                        })
+                    })
+                    .collect();
+                json!({"repository": {"pullRequest": {"reviewThreads": {
+                    "nodes": nodes, "pageInfo": {"hasNextPage": false}
+                }}}})
+            };
+            return (200, json!({"data": data}), None);
+        }
+        let scoped = path.strip_prefix("/repos/owner/repo").unwrap();
+        if scoped.starts_with("/issues/")
+            || scoped.starts_with("/pulls/7/files?")
+            || scoped.starts_with("/pulls/7/comments")
+            || scoped.starts_with("/pulls/comments/")
+        {
+            assert_eq!(token, "Bearer app-token");
+            if scoped == "/pulls/7/comments" && method == "POST" && self.reject_review {
+                return (422, Value::Null, None);
+            }
+            return (200, self.feedback(method, scoped, payload), None);
+        }
         let path = path.strip_prefix("/repos/owner/repo").unwrap();
         let is_check = path.contains("/check-runs");
         assert_eq!(
@@ -157,6 +235,50 @@ impl State {
         };
         (200, result, None)
     }
+    fn feedback(&mut self, method: &str, path: &str, mut payload: Value) -> Value {
+        let actor = json!({"login":"lint-gate[bot]", "id": 77, "type":"Bot"});
+        match method {
+            "GET" if path.starts_with("/pulls/7/files?") => json!(self.files),
+            "GET" if path.starts_with("/pulls/7/comments?") => json!(self.reviews),
+            "GET" if path.starts_with("/issues/7/comments?") => {
+                if self.issue.is_null() {
+                    json!([])
+                } else {
+                    json!([self.issue])
+                }
+            }
+            "POST" if path == "/issues/7/comments" => {
+                self.issue = json!({"id": 1, "user": actor, "body": payload["body"]});
+                if self.stop_after_reservation {
+                    self.pr["merge_commit_sha"] = json!(HEAD);
+                }
+                self.issue.clone()
+            }
+            "PATCH" if path == "/issues/comments/1" => {
+                self.issue["body"] = payload["body"].clone();
+                self.issue.clone()
+            }
+            "POST" if path == "/pulls/7/comments" => {
+                assert_eq!(payload["commit_id"], HEAD);
+                payload["id"] = json!(1000 + self.reviews.len());
+                payload["user"] = actor;
+                payload["resolved"] = json!(false);
+                self.reviews.push(payload.clone());
+                payload
+            }
+            "PATCH" if path.starts_with("/pulls/comments/") => {
+                let id = path.rsplit('/').next().unwrap().parse::<u64>().unwrap();
+                let item = self
+                    .reviews
+                    .iter_mut()
+                    .find(|item| item["id"] == id)
+                    .unwrap();
+                item["body"] = payload["body"].clone();
+                item.clone()
+            }
+            _ => panic!("unexpected feedback request {method} {path}"),
+        }
+    }
 }
 
 fn respond(stream: &mut TcpStream, state: &Mutex<State>) {
@@ -238,6 +360,18 @@ impl Mock {
     }
 
     fn run(&self, incoming: Option<Value>, pin: &str) -> String {
+        let output = self.step(incoming, pin, "github-publish", |_| {});
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    fn step(
+        &self,
+        incoming: Option<Value>,
+        pin: &str,
+        name: &str,
+        configure: impl FnOnce(&mut Command),
+    ) -> Output {
         let tools = common::without_python();
         let dir = tempfile::tempdir().unwrap();
         let event = dir.path().join("event.json");
@@ -247,8 +381,9 @@ impl Mock {
             json!({"repository": {"id": 10}, "workflow_run": run}).to_string(),
         )
         .unwrap();
-        let output = common::command(&tools)
-            .arg("github-publish")
+        let mut command = common::command(&tools);
+        command
+            .arg(name)
             .env("GITHUB_EVENT_PATH", event)
             .env("GITHUB_API_URL", format!("http://{}", self.address))
             .envs([
@@ -269,11 +404,9 @@ impl Mock {
             .env_remove("HTTPS_PROXY")
             .env_remove("https_proxy")
             .env_remove("ALL_PROXY")
-            .env_remove("all_proxy")
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        String::from_utf8(output.stdout).unwrap()
+            .env_remove("all_proxy");
+        configure(&mut command);
+        command.output().unwrap()
     }
 }
 
@@ -398,4 +531,286 @@ fn writes_require_a_verified_run_and_current_pr() {
     mock.state.lock().unwrap().run["referenced_workflows"][0]["path"] =
         json!(format!("{SCANNER}@{BRANCH_SHA}"));
     assert!(mock.run(None, BRANCH_SHA).contains("Published"));
+}
+
+struct PublicationFixture {
+    root: tempfile::TempDir,
+    mock: Mock,
+}
+
+impl PublicationFixture {
+    fn new() -> Self {
+        let mock = Mock::new();
+        mock.state.lock().unwrap().files = vec![json!({
+            "filename": "flow.ts", "status": "modified", "patch":"@@ -1,8 +1,8 @@\n function flow() {}"
+        })];
+        Self {
+            root: tempfile::tempdir().unwrap(),
+            mock,
+        }
+    }
+
+    fn blocking(&self, blocking: bool) {
+        let mut state = self.mock.state.lock().unwrap();
+        state.blocking = blocking;
+        state.scan_failure = blocking;
+    }
+
+    fn publish(
+        &self,
+        version: u8,
+        findings: &[Value],
+        scan_complete: bool,
+        compatible: &[&str],
+        configure: impl FnOnce(&mut Command),
+    ) -> Output {
+        let outputs = self.root.path().join("prepare");
+        fs::write(&outputs, "").unwrap();
+        let prepared = self.mock.step(
+            None,
+            "refs/heads/main",
+            "github-prepare-conversation",
+            |cmd| {
+                cmd.env_remove("APP_TOKEN")
+                    .env_remove("APP_ID")
+                    .env("GITHUB_OUTPUT", &outputs);
+            },
+        );
+        assert!(prepared.status.success(), "{prepared:?}");
+        let prepared = fs::read_to_string(outputs).unwrap();
+        assert!(prepared.contains("ready=true"));
+        let values: std::collections::BTreeMap<_, _> = prepared
+            .lines()
+            .map(|line| line.split_once('=').unwrap())
+            .collect();
+        let artifact = "lint-gate-verified-findings-321-1";
+        let report = self.root.path().join("report.json");
+        fs::write(
+            &report,
+            json!({"format_version": version, "scoring_version": 1,
+            "files_scanned": 1, "diagnostics": [], "findings": findings})
+            .to_string(),
+        )
+        .unwrap();
+        let manifest = self.root.path().join("anchors.json");
+        fs::write(
+            &manifest,
+            json!({"format_version": 1,
+            "revision": values["revision"], "base": values["base"], "head": values["head"],
+            "source_run": values["source_run"], "source_attempt": values["source_attempt"],
+            "artifact_name": artifact, "compatible_paths": compatible})
+            .to_string(),
+        )
+        .unwrap();
+        self.mock.step(
+            None,
+            "refs/heads/main",
+            "github-publish-conversation",
+            |cmd| {
+                cmd.envs([
+                    ("APP_SLUG", "lint-gate"),
+                    ("FINDINGS_ARTIFACT_NAME", artifact),
+                    (
+                        "SCAN_COMPLETE",
+                        if scan_complete { "true" } else { "false" },
+                    ),
+                ])
+                .env("FINDINGS_REPORT", report)
+                .env("FINDINGS_MANIFEST", manifest);
+                for (key, env) in [
+                    ("pull_request", "PULL_REQUEST"),
+                    ("revision", "VERIFIED_REVISION"),
+                    ("base", "VERIFIED_BASE"),
+                    ("head", "VERIFIED_HEAD"),
+                    ("source_run", "SOURCE_RUN"),
+                    ("source_attempt", "SOURCE_ATTEMPT"),
+                    ("scanner_repository", "VERIFIED_SCANNER_REPOSITORY"),
+                    ("scanner_sha", "VERIFIED_SCANNER_SHA"),
+                    ("details_url", "DETAILS_URL"),
+                    ("source_outcome", "SOURCE_OUTCOME"),
+                ] {
+                    cmd.env(env, values[key]);
+                }
+                configure(cmd);
+            },
+        )
+    }
+
+    fn deliver(&self, findings: &[Value], compatible: &[&str]) -> String {
+        let result = self.publish(2, findings, true, compatible, |_| {});
+        assert!(result.status.success(), "{result:?}");
+        String::from_utf8(result.stdout).unwrap()
+    }
+}
+
+fn finding(name: &str, line: u64, status: &str) -> Value {
+    json!({"rule":"cyclomatic-complexity", "path":"flow.ts", "language":"typescript", "name":name,
+        "scope":[{"name":name,"kind":"function"}], "range":{"start":{"line":line,"column":1}},
+        "score":3,"limit":1,"severity":if status == "reported" {"warn"} else {"error"},"status":status})
+}
+
+#[test]
+fn conversation_keeps_existing_thread_identity_and_fixes_resolve_only_app_threads() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    let blocker = finding("flow", 2, "blocking");
+    let warn = finding("@everyone <details> `warning`", 4, "reported");
+    let debt = finding("existing debt", 5, "baselined");
+    let findings = [blocker.clone(), warn, debt];
+    assert!(
+        fixture
+            .deliver(&findings, &["flow.ts"])
+            .contains("Published")
+    );
+    fixture.deliver(&findings, &["flow.ts"]);
+    {
+        let mut state = fixture.mock.state.lock().unwrap();
+        assert_eq!(state.reviews.len(), 1);
+        assert_eq!(state.reviews[0]["line"], 2);
+        assert_eq!(state.reviews[0]["side"], "RIGHT");
+        assert!(state.reviews[0]["body"].as_str().unwrap().contains(
+            "<!-- lint-gate-finding:e70b2329e2f09e1ec4cbf37ecf035ddfda6f7a2d762c077c66e5159236ddfb9e -->"
+        ));
+        let summary = state.issue["body"].as_str().unwrap();
+        assert!(summary.contains(r"\u0040everyone \u003cdetails> \u0060warning\u0060"));
+        assert!(!summary.contains("existing debt"));
+        state
+            .reviews
+            .push(json!({"id": 900, "body": "<!-- lint-gate-finding:dead -->",
+            "resolved":false,"user":{"type":"User","id":90,"login":"human"}}));
+    }
+    let moved = finding("flow", 3, "blocking");
+    fixture.deliver(&[moved], &["flow.ts"]);
+    {
+        let mut state = fixture.mock.state.lock().unwrap();
+        assert_eq!(state.reviews.len(), 3);
+        assert_eq!(state.reviews[0]["resolved"], true);
+        assert_eq!(state.reviews[2]["line"], 3);
+        state.run["run_attempt"] = json!(2);
+    }
+    fixture.blocking(false);
+    fixture.deliver(&[], &["flow.ts"]);
+    let state = fixture.mock.state.lock().unwrap();
+    assert_eq!(state.reviews[1]["resolved"], false);
+    assert_eq!(state.reviews[2]["resolved"], true);
+}
+
+#[test]
+fn conversation_supports_legacy_reports_and_file_anchors_and_rejects_unsafe_inputs() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    let mut legacy = finding("flow", 2, "blocking");
+    legacy.as_object_mut().unwrap().remove("severity");
+    let report = [legacy];
+    let result = fixture.publish(3, &report, true, &[], |_| {});
+    assert!(!result.status.success());
+    assert!(fixture.mock.state.lock().unwrap().issue.is_null());
+    let result = fixture.publish(1, &report, true, &[], |cmd| {
+        cmd.env("VERIFIED_HEAD", BASE);
+    });
+    assert!(String::from_utf8_lossy(&result.stdout).contains("target changed"));
+    let result = fixture.publish(1, &report, false, &[], |_| {});
+    assert!(String::from_utf8_lossy(&result.stdout).contains("No complete verified scan"));
+    assert!(fixture.mock.state.lock().unwrap().issue.is_null());
+    let result = fixture.publish(1, &report, true, &[], |_| {});
+    assert!(result.status.success(), "{result:?}");
+    let state = fixture.mock.state.lock().unwrap();
+    assert_eq!(state.reviews[0]["subject_type"], "file");
+    assert!(state.reviews[0].get("line").is_none());
+}
+
+#[test]
+fn conversation_rechecks_pr_before_writes_and_rejects_older_feedback() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    let blocker = [finding("flow", 2, "blocking")];
+    fixture.mock.state.lock().unwrap().stop_after_reservation = true;
+    assert!(
+        fixture
+            .deliver(&blocker, &["flow.ts"])
+            .contains("synthetic merge")
+    );
+    {
+        let mut state = fixture.mock.state.lock().unwrap();
+        assert!(state.reviews.is_empty());
+        state.pr["merge_commit_sha"] = json!(MERGE);
+        state.stop_after_reservation = false;
+        state.run["run_number"] = json!(3);
+    }
+    assert!(
+        fixture
+            .deliver(&blocker, &["flow.ts"])
+            .contains("newer verified scan")
+    );
+    {
+        let mut state = fixture.mock.state.lock().unwrap();
+        state.run["run_number"] = json!(5);
+        state.forbid_threads = true;
+    }
+    let result = fixture.publish(2, &blocker, true, &["flow.ts"], |_| {});
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Pull requests write"));
+    assert!(fixture.mock.state.lock().unwrap().reviews.is_empty());
+}
+
+#[test]
+fn conversation_uses_second_duplication_anchor_and_disambiguates_repeated_callables() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    let duplication = json!({"rule":"source-duplication", "score":12, "limit":10,
+    "severity":"error", "status":"blocking", "occurrences":[
+        {"path":"outside.ts", "range":{"start":{"line":1,"column":1}}},
+        {"path":"flow.ts", "range":{"start":{"line":7,"column":1}}}
+    ]});
+    let findings = [
+        finding("duplicate", 2, "blocking"),
+        finding("duplicate", 3, "blocking"),
+        duplication,
+    ];
+    fixture.deliver(&findings, &["flow.ts"]);
+    let mut state = fixture.mock.state.lock().unwrap();
+    assert_eq!(state.reviews.len(), 3);
+    assert_eq!(state.reviews[2]["path"], "flow.ts");
+    assert_eq!(state.reviews[2]["line"], 7);
+    assert_ne!(state.reviews[0]["body"], state.reviews[1]["body"]);
+    state.reviews.clear();
+    state.reject_review = true;
+    drop(state);
+    fixture.deliver(&findings, &["flow.ts"]);
+    let state = fixture.mock.state.lock().unwrap();
+    assert!(state.reviews.is_empty());
+    assert_eq!(
+        state.issue["body"]
+            .as_str()
+            .unwrap()
+            .matches("Unanchored blocking error")
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn conversation_bounds_threads_and_can_replace_a_moved_thread_at_the_limit() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    let mut findings: Vec<_> = (0..51)
+        .map(|index| finding(&format!("flow{index}"), 2, "blocking"))
+        .collect();
+    fixture.deliver(&findings, &["flow.ts"]);
+    {
+        let state = fixture.mock.state.lock().unwrap();
+        assert_eq!(state.reviews.len(), 50);
+        assert!(
+            state.issue["body"]
+                .as_str()
+                .unwrap()
+                .contains("thread limit reached")
+        );
+    }
+    findings[0] = finding("flow0", 3, "blocking");
+    fixture.deliver(&findings, &["flow.ts"]);
+    let state = fixture.mock.state.lock().unwrap();
+    assert_eq!(state.reviews.len(), 51);
+    assert_eq!(state.reviews[0]["resolved"], true);
+    assert_eq!(state.reviews[50]["line"], 3);
 }

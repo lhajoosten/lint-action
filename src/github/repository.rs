@@ -18,7 +18,7 @@ fn git(repository: &Path) -> Command {
     command
 }
 
-fn output(repository: &Path, args: &[&str]) -> io::Result<Output> {
+pub(super) fn output(repository: &Path, args: &[&str]) -> io::Result<Output> {
     git(repository).args(args).output()
 }
 
@@ -124,7 +124,7 @@ fn resolve_policy_path(path: &Path, remaining: usize) -> io::Result<PathBuf> {
     }
 }
 
-fn copy_policy(repository: &Path, revision: &str, directory: &Path) -> Result<()> {
+pub(super) fn copy_policy(repository: &Path, revision: &str, directory: &Path) -> Result<()> {
     if !is_object_id(revision) {
         return Err("the trusted policy revision must be a full Git object ID".into());
     }

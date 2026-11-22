@@ -500,12 +500,85 @@ mod unix {
         );
     }
 
+    fn stage_verified_scan_evidence() {
+        let fixture = Fixture::new();
+        let candidate = fixture.workspace.join("action-fixture-fail");
+        let head = git(&candidate, &["rev-parse", "HEAD"]);
+        fs::write(
+            candidate.join(UNUSUAL),
+            "export const fresh = () => true || false;",
+        )
+        .unwrap();
+        let revision = commit(&candidate, "Synthetic tree changes one finding location");
+        // A dirty copy of the policy must not waive findings in the independent scan.
+        fs::write(candidate.join(CONFIG), r#"{"mode":"report-only"}"#).unwrap();
+        let tool = common::binary().canonicalize().unwrap();
+        let mut rescan = common::command(&fixture.tools);
+        rescan
+            .args(["github-rescan"])
+            .arg(tool)
+            .env("GITHUB_WORKSPACE", &fixture.workspace)
+            .env("LINT_GATE_REPOSITORY", "action-fixture-fail")
+            .env("VERIFIED_BASE", &fixture.revision)
+            .env("VERIFIED_REVISION", &revision)
+            .env("RUNNER_TEMP", fixture.directory.path())
+            .env("GITHUB_OUTPUT", fixture.path("rescan"));
+        let output = rescan.output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        let outputs = fs::read_to_string(fixture.path("rescan")).unwrap();
+        let report = PathBuf::from(
+            outputs
+                .lines()
+                .find_map(|line| line.strip_prefix("report="))
+                .unwrap(),
+        );
+        assert_eq!(read(&report)["mode"], "baseline");
+        assert!(outputs.contains("outcome=1"));
+
+        let output = common::command(&fixture.tools)
+            .arg("github-stage-evidence")
+            .env("GITHUB_WORKSPACE", &fixture.workspace)
+            .env("LINT_GATE_REPOSITORY", "action-fixture-fail")
+            .env("VERIFIED_BASE", &fixture.revision)
+            .env("VERIFIED_REVISION", &revision)
+            .env("VERIFIED_HEAD", &head)
+            .env("SOURCE_RUN", "99")
+            .env("SOURCE_ATTEMPT", "1")
+            .env("GITHUB_RUN_ID", "123")
+            .env("GITHUB_RUN_ATTEMPT", "2")
+            .env("SCAN_REPORT", &report)
+            .env("RUNNER_TEMP", fixture.directory.path())
+            .env("GITHUB_OUTPUT", fixture.path("stage"))
+            .output()
+            .unwrap();
+        checked(output);
+        let evidence = fixture.path("lint-gate-findings");
+        assert_eq!(
+            fs::read(evidence.join("report.json")).unwrap(),
+            fs::read(report).unwrap()
+        );
+        let manifest = read(&evidence.join("anchors.json"));
+        assert_eq!(
+            manifest["artifact_name"],
+            "lint-gate-verified-findings-123-2"
+        );
+        assert_eq!(
+            manifest["compatible_paths"],
+            json!(["copy.tsx", "legacy.ts", "nested.ts", "original.ts"])
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.path("stage")).unwrap(),
+            "artifact_name=lint-gate-verified-findings-123-2\n"
+        );
+    }
+
     pub fn main() {
         let args: Vec<_> = env::args_os().skip(1).collect();
         match args.as_slice() {
             [] => {
                 trusted_policy_and_output();
                 exact_event_base_and_synthetic_merge();
+                stage_verified_scan_evidence();
             }
             [mode, workspace] if mode == "build" => {
                 println!("{}", build(Path::new(workspace), &common::without_python()))

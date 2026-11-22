@@ -1,5 +1,6 @@
 mod api;
 pub mod app_report;
+pub mod evidence;
 pub mod publisher;
 mod render;
 mod repository;

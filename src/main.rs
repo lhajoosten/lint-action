@@ -35,6 +35,15 @@ enum Command {
     GithubAppReport,
     #[command(hide = true)]
     GithubPublish,
+    #[command(hide = true)]
+    GithubPrepareConversation,
+    #[command(hide = true)]
+    GithubStageEvidence,
+    #[command(hide = true)]
+    GithubRescan { analyzer: PathBuf },
+    #[command(hide = true)]
+    GithubPublishConversation,
+
     /// Scan source and write the complete JSON report to stdout.
     Scan {
         #[command(flatten)]
@@ -733,6 +742,21 @@ fn run(command: Command) -> io::Result<u8> {
             });
         }
         Command::GithubPublish => return Ok(github::publisher::publish_action()),
+        Command::GithubPrepareConversation => {
+            return Ok(github::publisher::conversation::prepare_action());
+        }
+        Command::GithubPublishConversation => {
+            return Ok(github::publisher::conversation::publish_action());
+        }
+        Command::GithubStageEvidence => {
+            return Ok(github::evidence::action(github::evidence::stage));
+        }
+        Command::GithubRescan { analyzer } => {
+            return Ok(github::evidence::action(|| {
+                github::evidence::rescan(&analyzer)
+            }));
+        }
+
         Command::Scan { settings, paths } => {
             if let Err(diagnostic) = scan(&settings, &paths, &mut report, false) {
                 report.diagnostics.push(diagnostic);

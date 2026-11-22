@@ -1,3 +1,4 @@
+pub mod conversation;
 use super::api::{Error, GitHub, Result};
 use super::app_report::{AppReport, REPORT_LIMIT, REPORT_NAME};
 use super::is_sha;
@@ -57,7 +58,7 @@ struct Config {
     scanner: String,
     job: String,
     repository_id: u64,
-    app_id: u64,
+    repository: String,
     repository_url: String,
 }
 
@@ -477,7 +478,13 @@ fn upsert(
     Ok(format!("Published {CHECK} on PR head {target}."))
 }
 
-fn publish(api: &GitHub, checks: &GitHub, event: &Event, config: &Config) -> Result<String> {
+fn publish(
+    api: &GitHub,
+    checks: &GitHub,
+    event: &Event,
+    config: &Config,
+    app_id: u64,
+) -> Result<String> {
     let run = verified_run(api, event, config)?;
     let candidate = candidate_job(api, &run.identity, &config.job)?;
     let target = match target_head(api, &run, &candidate, config.repository_id) {
@@ -495,7 +502,7 @@ fn publish(api: &GitHub, checks: &GitHub, event: &Event, config: &Config) -> Res
         config.repository_url, run.identity.id, run.identity.run_attempt
     );
     let payload = check_output(outcome, report, &candidate.revision, &target, &details_url);
-    match upsert(checks, config.app_id, &run, &target, payload) {
+    match upsert(checks, app_id, &run, &target, payload) {
         Err(Error::Status {
             operation,
             status: status @ (404 | 422),
@@ -511,7 +518,7 @@ fn required(key: &str) -> Result<String> {
     env::var(key).map_err(|_| Error::Metadata)
 }
 
-fn from_environment() -> Result<String> {
+fn context() -> Result<(Config, Event, GitHub, String)> {
     let repository = required("GITHUB_REPOSITORY")?;
     let scanner = required("SCANNER_WORKFLOW")?;
     let workflow = required("SOURCE_WORKFLOW")?;
@@ -528,26 +535,39 @@ fn from_environment() -> Result<String> {
         repository_id: required("GITHUB_REPOSITORY_ID")?
             .parse()
             .map_err(|_| Error::Metadata)?,
-        app_id: required("APP_ID")?.parse().map_err(|_| Error::Metadata)?,
         repository_url: format!("{}/{repository}", required("GITHUB_SERVER_URL")?),
+        repository: repository.clone(),
     };
     let event = fs::read(env::var_os("GITHUB_EVENT_PATH").ok_or(Error::Metadata)?)
         .map_err(|_| Error::Metadata)?;
     let event = serde_json::from_slice(&event).map_err(|_| Error::Metadata)?;
     let base_url = required("GITHUB_API_URL")?;
     let api = GitHub::new(&base_url, &repository, required("GITHUB_TOKEN")?);
-    let checks = GitHub::new(&base_url, &repository, required("APP_TOKEN")?);
-    publish(&api, &checks, &event, &config)
+    Ok((config, event, api, base_url))
+}
+
+fn app_id() -> Result<u64> {
+    required("APP_ID")?.parse().map_err(|_| Error::Metadata)
+}
+
+fn from_environment() -> Result<String> {
+    let (config, event, api, base_url) = context()?;
+    let checks = GitHub::new(&base_url, &config.repository, required("APP_TOKEN")?);
+    publish(&api, &checks, &event, &config, app_id()?)
 }
 
 pub fn publish_action() -> u8 {
-    match from_environment() {
+    print_result(from_environment(), "Checks")
+}
+
+fn print_result(result: Result<String>, permission: &str) -> u8 {
+    match result {
         Ok(message) => println!("{message}"),
         Err(Error::Skip(message)) => println!("Skipped App publication. {message}"),
         Err(error) => {
             match error {
                 Error::Status { operation, status } => eprintln!(
-                    "{} Verify the workflow read permissions and the App installation's Checks write permission.",
+                    "{} Verify the workflow read permissions and the App installation's {permission} write permission.",
                     Error::status_message(&operation, status)
                 ),
                 Error::Network => {
