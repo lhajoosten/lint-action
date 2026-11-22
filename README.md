@@ -1,5 +1,7 @@
 # lint-gate
 
+<img width="2172" height="724" alt="image" src="https://github.com/user-attachments/assets/ce155939-1d71-4150-8afa-b5ba263b1e34" />
+
 A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, and cognitive complexity and opt-in source duplication in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
 
 ## Run locally
@@ -92,6 +94,8 @@ jobs:
 
 The reusable workflow has read-only repository access, checks out the candidate without persisting credentials, and uses the PR base policy. The first PR that adds the policy can bootstrap it without scanning against a missing base policy. A push or dispatch checks the selected revision. Disable **Source complexity** in Actions to pause this caller.
 
+To add an advisory check under your own GitHub App identity, see [GitHub App check setup](docs/github-app-check.md).
+
 To integrate the composite Action directly with an existing job, add it after checkout. Pin it to a reviewed full commit SHA. The analyzer uses no repository credentials or project build. The Action builds the pinned analyzer and grammars using Cargo.
 
 ```yaml
@@ -128,7 +132,9 @@ See the [cyclomatic scoring contract](docs/rules/cyclomatic-complexity.md), the 
 
 ## Rolling Release
 
-Configure `RELEASE_APP_ID` and `RELEASE_BOT_USER_ID` as Actions variables and `RELEASE_APP_PRIVATE_KEY` as an Actions secret. The existing `RELEASE_LOG_PRIVATE_KEY` secret is accepted as a fallback. Merged pull requests get a read-only preview and a separate, pinned release writer. Set `RELEASE_LOG_WRITE_ENABLED=false` to pause writes. Manual dispatch runs the read-only preflight.
+Configure `RELEASE_APP_ID` and `RELEASE_BOT_USER_ID` as Actions variables and `RELEASE_APP_PRIVATE_KEY` as an Actions secret. The existing `RELEASE_LOG_PRIVATE_KEY` secret is accepted as a fallback. The caller pins one Rolling Release workflow revision for the read-only preview and separate release writer. Set `RELEASE_LOG_WRITE_ENABLED=false` to pause merge writes. Manual dispatch on `main` runs a read-only preview.
+
+To verify a release tag and publish the composite Action, see [GitHub Marketplace releases](docs/marketplace-release.md).
 
 ## Maintain the rules
 

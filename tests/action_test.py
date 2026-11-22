@@ -45,7 +45,8 @@ class ActionTests(unittest.TestCase):
                     env=env, capture_output=True, text=True, check=False,
                 )
                 self.assertEqual(process.returncode, code, (process.stdout, process.stderr))
-                reports.append(Path(Path(env["GITHUB_OUTPUT"]).read_text().splitlines()[-1][7:]))
+                reports.append(Path(dict(line.split("=", 1) for line in
+                                 Path(env["GITHUB_OUTPUT"]).read_text().splitlines())["report"]))
                 if code:
                     self.assertIn("file=action-fixture-fail/copy.tsx,line=1,col=19::"
                                   + DUPLICATION_MESSAGE, process.stdout)
@@ -106,7 +107,8 @@ class ActionTests(unittest.TestCase):
                 env=env, capture_output=True, text=True, check=False,
             )
             self.assertEqual(process.returncode, 0, process.stdout)
-            output = Path(Path(env["GITHUB_OUTPUT"]).read_text().splitlines()[-1][7:])
+            output = Path(dict(line.split("=", 1) for line in
+                                 Path(env["GITHUB_OUTPUT"]).read_text().splitlines())["report"])
             self.assertEqual(json.loads(output.read_bytes())["mode"], "strict")
             self.assertIn("::warning title=lint-gate quality gate,file=action-fixture-fail/nested.ts",
                           process.stdout)

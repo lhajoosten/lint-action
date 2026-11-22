@@ -1,0 +1,17 @@
+name: Own source complexity
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  complexity:
+    uses: lhajoosten/lint-gate/.github/workflows/source-complexity.yml@refs/heads/main
+    with:
+      publish-report: true
