@@ -119,7 +119,12 @@ impl Policy {
     }
 
     pub fn includes(&self, path: &Path) -> bool {
-        self.include.is_match(path) && !self.exclude.is_match(path)
+        self.include.is_match(path)
+            && !self.exclude.is_match(path)
+            && !path
+                .ancestors()
+                .skip(1)
+                .any(|parent| !parent.as_os_str().is_empty() && self.excludes_directory(parent))
     }
 
     pub fn excludes_directory(&self, path: &Path) -> bool {

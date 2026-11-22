@@ -514,6 +514,21 @@ function host(a: boolean) {
         self.assertEqual(incomplete.returncode, 2)
         self.assertEqual(incomplete.stdout, b"")
 
+    def test_baseline_review_preserves_entries_under_excluded_directories(self):
+        options = {"limits": {"python": 1}, "duplication": {"minimum_tokens": 10}}
+        self.config("baseline", **options)
+        self.write("src/current.ts", "function current() { prepare(item); send(item); }")
+        self.write("vendor/nested/copy.ts", "function copy() { prepare(item); send(item); }")
+        self.write("vendor/nested/debt.py", "def f(x): return 1 if x else 0\n")
+        baseline, raw = self.invoke(0, "baseline")
+        self.assertEqual(len(baseline["entries"]), 1)
+        self.assertEqual(len(baseline["duplication_entries"]), 1)
+        self.write(BASELINE, raw.decode())
+
+        self.config("baseline", exclude=["vendor"], **options)
+        self.assertEqual(self.invoke(0)[0]["files_scanned"], 1)
+        self.assertEqual(self.invoke(0, "baseline-review")[0], [])
+
     def test_baseline_review_narrows_shorter_duplication(self):
         self.duplication("baseline", minimum=10)
         long = "prepare(item); send(item); cleanup(item);"
