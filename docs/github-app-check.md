@@ -49,7 +49,7 @@ The repository serializes check writes in the publisher job. Each App owns one c
 
 ## Verify the lint-gate pilot
 
-The pilot uses the repository's protected `main` branch for the reusable scanner. After the workflow is available on the default branch and the App is installed, verify the following on GitHub:
+The pilot pins the reusable scanner to the same reviewed commit SHA in both caller workflows. Update the two pins together when upgrading the scanner. After the workflow is available on the default branch and the App is installed, verify the following on GitHub:
 
 - Open one branch PR and one fork PR. Confirm App attribution, check visibility, and the link to the exact attempt. Compare the commit displayed by the check to the PR head and the synthetic merge SHA in the summary to the source run.
 - Rerun all jobs for one PR. Confirm the existing check updates to the new attempt without duplicating.
