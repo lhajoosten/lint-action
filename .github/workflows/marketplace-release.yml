@@ -1,0 +1,78 @@
+name: Verify Marketplace release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable GitHub release tag to verify (for example v0.1.1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Verify the release and select its tag
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
+        run: |
+          if [[ "$PRIVATE_REPOSITORY" == true ]]; then
+            echo '::error::Marketplace Actions require a public repository.'
+            exit 1
+          fi
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo '::error::Use a stable release tag in vMAJOR.MINOR.PATCH form.'
+            exit 1
+          fi
+          gh release view "$TAG" --repo "$GH_REPO" --json tagName,isDraft,isPrerelease |
+            jq -e --arg tag "$TAG" '.tagName == $tag and (.isDraft or .isPrerelease | not)' > /dev/null
+          printf 'tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.release.outputs.tag }}
+          persist-credentials: false
+      - name: Verify tag and action metadata
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import tomllib
+
+          tag = os.environ["TAG"]
+          version = tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"]
+          if tag != f"v{version}":
+              raise SystemExit(f"Release tag {tag} must match Cargo package version {version}.")
+          metadata = [name for name in ("action.yml", "action.yaml") if Path(name).is_file()]
+          if len(metadata) != 1:
+              raise SystemExit("Marketplace requires exactly one action metadata file at the repository root.")
+          PY
+      - name: Build the locked release and run Action fixtures
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 build --locked --release
+          export LINT_GATE_BIN="$PWD/target/release/lint-gate"
+          python3 tests/cli.py
+          python3 tests/action_test.py
+      - name: Link to Marketplace publication
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          {
+            printf 'Verified release **%s** at commit `%s`.\n\n' "$TAG" "$(git rev-parse HEAD)"
+            printf '[Edit the GitHub release](%s/%s/releases/edit/%s) and select **Publish this Action to the GitHub Marketplace**.\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$TAG"
+          } >> "$GITHUB_STEP_SUMMARY"

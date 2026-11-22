@@ -84,6 +84,8 @@ jobs:
 
 The reusable workflow has read-only repository access, checks out the candidate without persisting credentials, and uses the PR base policy. The first PR that adds the policy can bootstrap it without scanning against a missing base policy. A push or dispatch checks the selected revision. Disable **Source complexity** in Actions to pause this caller.
 
+To add an advisory check under your own GitHub App identity, see [GitHub App check setup](docs/github-app-check.md).
+
 To integrate the composite Action directly with an existing job, add it after checkout. Pin it to a reviewed full commit SHA. The analyzer uses no repository credentials or project build. The Action builds the pinned analyzer and grammars using Cargo.
 
 ```yaml
@@ -121,6 +123,8 @@ See the [cyclomatic scoring contract](docs/rules/cyclomatic-complexity.md), the 
 ## Rolling Release
 
 Configure `RELEASE_APP_ID` and `RELEASE_BOT_USER_ID` as Actions variables and `RELEASE_APP_PRIVATE_KEY` as an Actions secret. The existing `RELEASE_LOG_PRIVATE_KEY` secret is accepted as a fallback. The caller pins one Rolling Release workflow revision for the read-only preview and separate release writer. Set `RELEASE_LOG_WRITE_ENABLED=false` to pause merge writes. Manual dispatch on `main` runs a read-only preview.
+
+To verify a release tag and publish the composite Action, see [GitHub Marketplace releases](docs/marketplace-release.md).
 
 ## Maintain the rules
 
