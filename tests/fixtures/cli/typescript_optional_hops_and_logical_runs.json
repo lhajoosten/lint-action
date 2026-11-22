@@ -1,0 +1,51 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"typescript\": 1}, \"cognitive_limits\": {\"typescript\": 1}}"},
+      "$TREE0/optional.ts": {"text": "function load() {\n    return ((source?.client?.load?.() && (ready && cached)) || backup) ?? select(value ?? fallback);\n}\n"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "optional.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "load"}],
+          "name": "load",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 3,"column": 2}},
+          "score": 9,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cognitive-complexity",
+          "path": "optional.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "load"}],
+          "name": "load",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 3,"column": 2}},
+          "score": 4,
+          "contributions": [
+            {"construct": "&&","points": 1,"nesting": 0,"range": {"start": {"line": 2,"column": 39},"end": {"line": 2,"column": 41}}},
+            {"construct": "||","points": 1,"nesting": 0,"range": {"start": {"line": 2,"column": 61},"end": {"line": 2,"column": 63}}},
+            {"construct": "??","points": 1,"nesting": 0,"range": {"start": {"line": 2,"column": 72},"end": {"line": 2,"column": 74}}},
+            {"construct": "??","points": 1,"nesting": 0,"range": {"start": {"line": 2,"column": 88},"end": {"line": 2,"column": 90}}}
+          ],
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  }
+]

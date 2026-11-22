@@ -1,0 +1,129 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {}, \"duplication\": {}}"},
+      "$TREE0/a.ts": {"text": "function a() {unique();unique();unique();unique();unique();unique();unique();unique();unique();unique();unique();unique();unique();}"},
+      "$TREE0/b.tsx": {"text": "function b() {unique();unique();unique();unique();unique();unique();unique();unique();unique();unique();unique();unique();unique();}"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 52,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 15},"end": {"line": 1,"column": 132}}},
+            {"path": "b.tsx","range": {"start": {"line": 1,"column": 15},"end": {"line": 1,"column": 132}}}
+          ],
+          "limit": 50,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 0}}"}},
+    "args": ["validate","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_config","path": "$TREE0/.lint-action.json","message": "duplication.minimum_tokens must be positive"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 10}}"},
+      "$TREE0/broken.tsx": {"text": "const malformed = <main>"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 3,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 12,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 15},"end": {"line": 1,"column": 42}}},
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 42},"end": {"line": 1,"column": 69}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 24,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 15},"end": {"line": 1,"column": 69}}},
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 69},"end": {"line": 1,"column": 123}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 52,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 15},"end": {"line": 1,"column": 132}}},
+            {"path": "b.tsx","range": {"start": {"line": 1,"column": 15},"end": {"line": 1,"column": 132}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 12,
+          "occurrences": [
+            {"path": "b.tsx","range": {"start": {"line": 1,"column": 15},"end": {"line": 1,"column": 42}}},
+            {"path": "b.tsx","range": {"start": {"line": 1,"column": 42},"end": {"line": 1,"column": 69}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 24,
+          "occurrences": [
+            {"path": "b.tsx","range": {"start": {"line": 1,"column": 15},"end": {"line": 1,"column": 69}}},
+            {"path": "b.tsx","range": {"start": {"line": 1,"column": 69},"end": {"line": 1,"column": 123}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": [
+        {
+          "kind": "parse_error",
+          "path": "broken.tsx",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 1,"column": 25}},
+          "message": "Tree-sitter could not parse this syntax"
+        }
+      ]
+    },
+    "stderr": null
+  }
+]

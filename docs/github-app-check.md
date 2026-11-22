@@ -54,3 +54,18 @@ The pilot pins the reusable scanner to the same reviewed commit SHA in both call
 - Open one branch PR and one fork PR. Confirm App attribution, check visibility, and the link to the exact attempt. Compare the commit displayed by the check to the PR head and the synthetic merge SHA in the summary to the source run.
 - Rerun all jobs for one PR. Confirm the existing check updates to the new attempt without duplicating.
 - Exercise a policy violation and confirm that the native Actions job still controls the required check. Check a run with publishing disabled or a missing App ID to confirm that the analysis outcome is independent of publication.
+
+## Upgrade and rollback
+
+When upgrading to the Rust-based GitHub integration, select a reviewed
+provider revision that contains the reusable scanner and publisher. Keep the
+scanner caller's ref and the publisher's expected scanner ref aligned. The
+Rust integration uses the existing report artifact version, step names, and
+workflow inputs, so existing policy, baselines, check names, and App
+permissions carry forward.
+
+Verify the pilot with the existing App installation before promoting the
+provider ref. Record the exact scanner and publisher revisions used. To roll
+back, restore the previous scanner ref in both callers and select the
+previous publisher revision if it changed. Consumers that pin a full SHA can
+adopt or roll back by updating those pins together.

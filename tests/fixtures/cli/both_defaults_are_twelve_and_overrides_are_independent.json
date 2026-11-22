@@ -1,0 +1,202 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\"}"},
+      "$TREE0/limits.ts": {
+        "text": "function cyclo_equal() { if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work(); }\nfunction cognitive_equal() { if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work(); }\nfunction both_over() { if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work();if (x) work(); }\n"
+      }
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "limits.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "cognitive_equal"}],
+          "name": "cognitive_equal",
+          "range": {"start": {"line": 2,"column": 1},"end": {"line": 2,"column": 200}},
+          "score": 13,
+          "limit": 12,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "limits.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "both_over"}],
+          "name": "both_over",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 3,"column": 208}},
+          "score": 14,
+          "limit": 12,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cognitive-complexity",
+          "path": "limits.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "both_over"}],
+          "name": "both_over",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 3,"column": 208}},
+          "score": 13,
+          "contributions": [
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 24},"end": {"line": 3,"column": 26}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 38},"end": {"line": 3,"column": 40}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 52},"end": {"line": 3,"column": 54}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 66},"end": {"line": 3,"column": 68}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 80},"end": {"line": 3,"column": 82}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 94},"end": {"line": 3,"column": 96}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 108},"end": {"line": 3,"column": 110}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 122},"end": {"line": 3,"column": 124}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 136},"end": {"line": 3,"column": 138}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 150},"end": {"line": 3,"column": 152}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 164},"end": {"line": 3,"column": 166}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 178},"end": {"line": 3,"column": 180}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 192},"end": {"line": 3,"column": 194}}}
+          ],
+          "limit": 12,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {\"typescript\": 100}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cognitive-complexity",
+          "path": "limits.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "both_over"}],
+          "name": "both_over",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 3,"column": 208}},
+          "score": 13,
+          "contributions": [
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 24},"end": {"line": 3,"column": 26}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 38},"end": {"line": 3,"column": 40}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 52},"end": {"line": 3,"column": 54}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 66},"end": {"line": 3,"column": 68}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 80},"end": {"line": 3,"column": 82}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 94},"end": {"line": 3,"column": 96}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 108},"end": {"line": 3,"column": 110}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 122},"end": {"line": 3,"column": 124}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 136},"end": {"line": 3,"column": 138}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 150},"end": {"line": 3,"column": 152}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 164},"end": {"line": 3,"column": 166}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 178},"end": {"line": 3,"column": 180}}},
+            {"construct": "if","points": 1,"nesting": 0,"range": {"start": {"line": 3,"column": 192},"end": {"line": 3,"column": 194}}}
+          ],
+          "limit": 12,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"cognitive_limits\": {\"typescript\": 100}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "limits.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "cognitive_equal"}],
+          "name": "cognitive_equal",
+          "range": {"start": {"line": 2,"column": 1},"end": {"line": 2,"column": 200}},
+          "score": 13,
+          "limit": 12,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "limits.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "both_over"}],
+          "name": "both_over",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 3,"column": 208}},
+          "score": 14,
+          "limit": 12,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"typescript\": 12}, \"cognitive_limits\": {\"typescript\": 0}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_config","path": "$TREE0/.lint-action.json","message": "cognitive_limits requires positive limits for enabled TypeScript or TSX"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"typescript\": 12}, \"cognitive_limits\": {\"python\": 12}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_config","path": "$TREE0/.lint-action.json","message": "cognitive_limits requires positive limits for enabled TypeScript or TSX"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"typescript\": 12}, \"cognitive_limits\": {\"tsx\": 12}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_config","path": "$TREE0/.lint-action.json","message": "cognitive_limits requires positive limits for enabled TypeScript or TSX"}]
+    },
+    "stderr": null
+  }
+]

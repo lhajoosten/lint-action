@@ -1,0 +1,280 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {\"python\": 1}}"},
+      "$TREE0/debt.py": {"text": "def f(x):\n    return 1 if x and x > 2 else 0\n"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_baseline","path": "$TREE0/.lint-action-baseline.json","message": "No such file or directory (os error 2)"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["baseline","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "scoring_version": 1,
+      "entries": [{"rule": "cyclomatic-complexity","identity": {"path": "debt.py","language": "python","scope": [{"kind": "function","name": "f"}]},"score": 3}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\"scoring_version\": 1, \"entries\": [{\"rule\": \"cyclomatic-complexity\", \"identity\": {\"path\": \"debt.py\", \"language\": \"python\", \"scope\": [{\"kind\": \"function\", \"name\": \"f\"}]}, \"score\": 3}]}"
+      }
+    },
+    "args": ["validate","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "baseline","files_scanned": 0,"files_skipped": 0,"findings": [],"diagnostics": []},
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/debt.py": {"text": "\ndef f(x):\n    return 1 if x and x > 2 else 0\n"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 1,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "debt.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 2,"column": 1},"end": {"line": 3,"column": 35}},
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "baselined"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/debt.py": {"text": "def f(x):\n    return 1 if x else 0\n"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 1,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "debt.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 2,"column": 25}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "baselined"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/debt.py": {"text": "def f(x):\n    return 1 if x and x > 2 or x else 0\n"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 1,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "debt.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 2,"column": 40}},
+          "score": 4,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/debt.py": {"text": "def f(x):\n    return 1 if x and x > 2 else 0\ndef g(x):\n    return 1 if x and x > 2 else 0\n"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 1,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "debt.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 2,"column": 35}},
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "baselined"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "debt.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "g"}],
+          "name": "g",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 4,"column": 35}},
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/debt.py": {"text": "def f(x):\n    return 1 if x and x > 2 else 0\ndef f(x): return x\n"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 1,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "debt.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 2,"column": 35}},
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {"files": {},"args": ["baseline","--root","$TREE0"],"status": 0,"stdout": {"scoring_version": 1,"entries": []},"stderr": null},
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\"scoring_version\": 1, \"entries\": [{\"rule\": \"cyclomatic-complexity\", \"identity\": {\"path\": \"debt.py\", \"language\": \"python\", \"scope\": [{\"kind\": \"function\", \"name\": \"f\"}]}, \"score\": 3}, {\"rule\": \"cyclomatic-complexity\", \"identity\": {\"path\": \"debt.py\", \"language\": \"python\", \"scope\": [{\"kind\": \"function\", \"name\": \"f\"}]}, \"score\": 3}]}"
+      },
+      "$TREE0/debt.py": {"text": "def f(x):\n    return 1 if x and x > 2 else 0\n"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 1,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "debt.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 2,"column": 35}},
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/debt.py": null,
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\"scoring_version\": 1, \"entries\": [{\"rule\": \"cyclomatic-complexity\", \"identity\": {\"path\": \"debt.py\", \"language\": \"python\", \"scope\": [{\"kind\": \"function\", \"name\": \"f\"}]}, \"score\": 3}]}"
+      },
+      "$TREE0/moved.py": {"text": "def f(x):\n    return 1 if x and x > 2 else 0\n"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 1,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "moved.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 2,"column": 35}},
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\"scoring_version\": 2, \"entries\": [{\"rule\": \"cyclomatic-complexity\", \"identity\": {\"path\": \"debt.py\", \"language\": \"python\", \"scope\": [{\"kind\": \"function\", \"name\": \"f\"}]}, \"score\": 3}]}"
+      }
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_baseline","path": "$TREE0/.lint-action-baseline.json","message": "baseline scoring version 2 differs from 1"}]
+    },
+    "stderr": null
+  }
+]

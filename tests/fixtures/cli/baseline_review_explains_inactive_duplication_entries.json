@@ -1,0 +1,50 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 10}}"},
+      "$TREE0/a.ts": {"text": "function first() { prepare(item); send(item); }"},
+      "$TREE0/b.ts": {"text": "function second() { prepare(item); send(item); }"}
+    },
+    "args": ["baseline","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "scoring_version": 1,
+      "entries": [],
+      "duplication_entries": [
+        {
+          "occurrences": [
+            {"path": "a.ts","language": "typescript","scope": [{"kind": "function","name": "first"}]},
+            {"path": "b.ts","language": "typescript","scope": [{"kind": "function","name": "second"}]}
+          ],
+          "score": 10,
+          "tokens": [
+            "identifier\u0000prepare",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;",
+            "identifier\u0000send",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;"
+          ]
+        }
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\"scoring_version\": 1, \"entries\": [], \"duplication_entries\": [{\"occurrences\": [{\"path\": \"a.ts\", \"language\": \"typescript\", \"scope\": [{\"kind\": \"function\", \"name\": \"first\"}]}, {\"path\": \"b.ts\", \"language\": \"typescript\", \"scope\": [{\"kind\": \"function\", \"name\": \"second\"}]}], \"score\": 10, \"tokens\": [\"identifier\\u0000prepare\", \"(\\u0000(\", \"identifier\\u0000item\", \")\\u0000)\", \";\\u0000;\", \"identifier\\u0000send\", \"(\\u0000(\", \"identifier\\u0000item\", \")\\u0000)\", \";\\u0000;\"]}]}"
+      },
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {\"python\": 1}}"},
+      "$TREE0/source.py": {"text": "def ready(): return True\n"}
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [],
+    "stderr": "baseline-review: deferred inactive duplication rule for a.ts and b.ts\n"
+  }
+]

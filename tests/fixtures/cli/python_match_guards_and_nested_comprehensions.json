@@ -1,0 +1,47 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"python\": 1}}"},
+      "$TREE0/guards.py": {
+        "text": "def collect(groups, allow):\n    match groups:\n        case [first, *rest] if first and (rest or allow):\n            def keep(item):\n                return any(part for part in item if part)\n            return [[item for item in group if keep(item)] for group in rest if group]\n        case _:\n            return []\n"
+      }
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "guards.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "collect"}],
+          "name": "collect",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 8,"column": 22}},
+          "score": 10,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "guards.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "collect"},{"kind": "function","name": "keep"}],
+          "name": "keep",
+          "range": {"start": {"line": 4,"column": 13},"end": {"line": 5,"column": 58}},
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  }
+]

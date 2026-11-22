@@ -1,0 +1,60 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {\"python\": 1}, \"duplication\": {\"minimum_tokens\": 10}}"},
+      "$TREE0/src": {"directory": true},
+      "$TREE0/src/current.ts": {"text": "function current() { prepare(item); send(item); }"},
+      "$TREE0/vendor": {"directory": true},
+      "$TREE0/vendor/nested": {"directory": true},
+      "$TREE0/vendor/nested/copy.ts": {"text": "function copy() { prepare(item); send(item); }"},
+      "$TREE0/vendor/nested/debt.py": {"text": "def f(x): return 1 if x else 0\n"}
+    },
+    "args": ["baseline","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "scoring_version": 1,
+      "entries": [{"rule": "cyclomatic-complexity","identity": {"path": "vendor/nested/debt.py","language": "python","scope": [{"kind": "function","name": "f"}]},"score": 2}],
+      "duplication_entries": [
+        {
+          "occurrences": [
+            {"path": "src/current.ts","language": "typescript","scope": [{"kind": "function","name": "current"}]},
+            {"path": "vendor/nested/copy.ts","language": "typescript","scope": [{"kind": "function","name": "copy"}]}
+          ],
+          "score": 10,
+          "tokens": [
+            "identifier\u0000prepare",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;",
+            "identifier\u0000send",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;"
+          ]
+        }
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\n  \"scoring_version\": 1,\n  \"entries\": [\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"vendor/nested/debt.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"f\"\n          }\n        ]\n      },\n      \"score\": 2\n    }\n  ],\n  \"duplication_entries\": [\n    {\n      \"occurrences\": [\n        {\n          \"path\": \"src/current.ts\",\n          \"language\": \"typescript\",\n          \"scope\": [\n            {\n              \"kind\": \"function\",\n              \"name\": \"current\"\n            }\n          ]\n        },\n        {\n          \"path\": \"vendor/nested/copy.ts\",\n          \"language\": \"typescript\",\n          \"scope\": [\n            {\n              \"kind\": \"function\",\n              \"name\": \"copy\"\n            }\n          ]\n        }\n      ],\n      \"score\": 10,\n      \"tokens\": [\n        \"identifier\\u0000prepare\",\n        \"(\\u0000(\",\n        \"identifier\\u0000item\",\n        \")\\u0000)\",\n        \";\\u0000;\",\n        \"identifier\\u0000send\",\n        \"(\\u0000(\",\n        \"identifier\\u0000item\",\n        \")\\u0000)\",\n        \";\\u0000;\"\n      ]\n    }\n  ]\n}\n"
+      },
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {\"python\": 1}, \"exclude\": [\"vendor\"], \"duplication\": {\"minimum_tokens\": 10}}"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "baseline","files_scanned": 1,"files_skipped": 2,"findings": [],"diagnostics": []},
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [],
+    "stderr": "baseline-review: deferred complexity entry outside policy selection for vendor/nested/debt.py\nbaseline-review: deferred duplication entry outside policy selection for src/current.ts and vendor/nested/copy.ts\n"
+  }
+]

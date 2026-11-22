@@ -1,0 +1,45 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"rust\": 1, \"typescript\": 1, \"tsx\": 1, \"python\": 1}}"},
+      "$TREE0/link": {"symlink": "$TREE0/real"},
+      "$TREE0/link.py": {"symlink": "$TREE0/real/ready.py"},
+      "$TREE0/real": {"directory": true},
+      "$TREE0/real/ready.py": {"text": "def ready(): return True\n"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "report-only","files_scanned": 1,"files_skipped": 3,"findings": [],"diagnostics": []},
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["scan","--root","$TREE0","link/ready.py"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_path","path": "link/ready.py","message": "selection must be a regular file or directory without symlinks"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/private.py": {"unreadable": true,"mode": 0}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 1,
+      "files_skipped": 3,
+      "findings": [],
+      "diagnostics": [{"kind": "unreadable_source","path": "private.py","message": "Permission denied (os error 13)"}]
+    },
+    "stderr": null
+  }
+]

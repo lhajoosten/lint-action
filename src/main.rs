@@ -2,6 +2,7 @@ mod analyzer;
 mod cognitive;
 mod comparison;
 mod duplication;
+mod github;
 mod grammar;
 mod model;
 mod policy;
@@ -28,6 +29,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(hide = true)]
+    GithubScan,
+    #[command(hide = true)]
+    GithubAppReport,
+    #[command(hide = true)]
+    GithubPublish,
     /// Scan source and write the complete JSON report to stdout.
     Scan {
         #[command(flatten)]
@@ -117,7 +124,7 @@ impl Settings {
     }
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Status {
     Reported,
@@ -715,6 +722,17 @@ fn write_json(mut output: impl Write, value: &impl Serialize) -> io::Result<()> 
 fn run(command: Command) -> io::Result<u8> {
     let mut report = Report::new();
     match command {
+        Command::GithubScan => return Ok(github::scan_action()),
+        Command::GithubAppReport => {
+            return Ok(match github::app_report::normalize_action() {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("lint-gate: {error}");
+                    1
+                }
+            });
+        }
+        Command::GithubPublish => return Ok(github::publisher::publish_action()),
         Command::Scan { settings, paths } => {
             if let Err(diagnostic) = scan(&settings, &paths, &mut report, false) {
                 report.diagnostics.push(diagnostic);

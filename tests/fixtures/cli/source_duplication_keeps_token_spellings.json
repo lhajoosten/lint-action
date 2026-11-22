@@ -1,0 +1,61 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 9}}"},
+      "$TREE0/first.ts": {"text": "function first() { record(item + \"value\"); }"},
+      "$TREE0/second.tsx": {"text": "function second() { record(item + \"value\"); }"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 9,
+          "occurrences": [
+            {"path": "first.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 43}}},
+            {"path": "second.tsx","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 44}}}
+          ],
+          "limit": 9,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/second.tsx": {"text": "function second() { record(other + \"value\"); }"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "report-only","files_scanned": 2,"files_skipped": 1,"findings": [],"diagnostics": []},
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/second.tsx": {"text": "function second() { record(item - \"value\"); }"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "report-only","files_scanned": 2,"files_skipped": 1,"findings": [],"diagnostics": []},
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/second.tsx": {"text": "function second() { record(item + \"changed\"); }"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "report-only","files_scanned": 2,"files_skipped": 1,"findings": [],"diagnostics": []},
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 4294967295}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "report-only","files_scanned": 2,"files_skipped": 1,"findings": [],"diagnostics": []},
+    "stderr": null
+  }
+]

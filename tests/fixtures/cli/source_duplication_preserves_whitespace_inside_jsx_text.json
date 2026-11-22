@@ -1,0 +1,67 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 13}}"},
+      "$TREE0/a.tsx": {"text": "function original() {\n  record();\n  return <p>Hello world</p>;\n}\n"},
+      "$TREE0/b.tsx": {"text": "function copy() {\n  record();\n  return <p>Hello world</p>;\n}\n"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 13,
+          "occurrences": [
+            {"path": "a.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 29}}},
+            {"path": "b.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 29}}}
+          ],
+          "limit": 13,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/b.tsx": {"text": "function copy() {\n    record ( );\n    return <p>Hello world</p> ;\n}\n"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 13,
+          "occurrences": [
+            {"path": "a.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 29}}},
+            {"path": "b.tsx","range": {"start": {"line": 2,"column": 5},"end": {"line": 3,"column": 32}}}
+          ],
+          "limit": 13,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/b.tsx": {"text": "function copy() {\n    record ( );\n    return <p>Hello  world</p> ;\n}\n"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "report-only","files_scanned": 2,"files_skipped": 1,"findings": [],"diagnostics": []},
+    "stderr": null
+  }
+]

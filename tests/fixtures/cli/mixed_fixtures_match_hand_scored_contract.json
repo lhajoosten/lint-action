@@ -1,0 +1,215 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"rust\": 1, \"typescript\": 1, \"tsx\": 1, \"python\": 1}}"},
+      "$TREE0/flow.py": {
+        "text": "class Example:\n    async def sample(self, items):\n        nested = lambda x: x if x else 0\n        try:\n            match items:\n                case [first, *_] if first:\n                    return [nested(x) for x in items if x and x > 0]\n                case _:\n                    return []\n        except ValueError:\n            return []\n"
+      },
+      "$TREE0/flow.rs": {
+        "text": "fn sample(x: bool) -> Option<bool> {\n    let nested = || if x { 1 } else { 0 };\n    let value = Some(true)?;\n    if value && x {\n        return None;\n    }\n    match nested() {\n        0 => Some(false),\n        n if n > 1 => Some(true),\n        _ => Some(value),\n    }\n}\n"
+      },
+      "$TREE0/flow.ts": {
+        "text": "function sample(x?: { v?: boolean }, y = false) {\n    const nested = () => y ? 1 : 0;\n    switch (nested()) {\n        case 0: return x?.v ?? false;\n        default: return y;\n    }\n}\n"
+      },
+      "$TREE0/ignored.txt": {"text": "if this were a selected grammar it would not parse\n"},
+      "$TREE0/view.tsx": {"text": "export const View = ({ ok }: { ok?: boolean }) => (\n    <div>{ok && <span>{ok ? \"yes\" : \"no\"}</span>}</div>\n);\n"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 4,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.py",
+          "language": "python",
+          "scope": [{"kind": "class_definition","name": "Example"},{"kind": "function","name": "sample"}],
+          "name": "sample",
+          "range": {"start": {"line": 2,"column": 5},"end": {"line": 11,"column": 22}},
+          "score": 8,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.py",
+          "language": "python",
+          "scope": [{"kind": "class_definition","name": "Example"},{"kind": "function","name": "sample"},{"kind": "lambda","name": "nested"}],
+          "name": "nested",
+          "range": {"start": {"line": 3,"column": 18},"end": {"line": 3,"column": 41}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.rs",
+          "language": "rust",
+          "scope": [{"kind": "function","name": "sample"}],
+          "name": "sample",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 12,"column": 2}},
+          "score": 8,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.rs",
+          "language": "rust",
+          "scope": [{"kind": "function","name": "sample"},{"kind": "closure","name": "nested"}],
+          "name": "nested",
+          "range": {"start": {"line": 2,"column": 18},"end": {"line": 2,"column": 42}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "sample"}],
+          "name": "sample",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 7,"column": 2}},
+          "score": 5,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "sample"},{"kind": "arrow","name": "nested"}],
+          "name": "nested",
+          "range": {"start": {"line": 2,"column": 20},"end": {"line": 2,"column": 35}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "view.tsx",
+          "language": "tsx",
+          "scope": [{"kind": "arrow","name": "View"}],
+          "name": "View",
+          "range": {"start": {"line": 1,"column": 21},"end": {"line": 3,"column": 2}},
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["scan","--root","$TREE0","--","view.tsx","ignored.txt","flow.py",".lint-action.json","flow.rs","flow.ts","flow.ts"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 4,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.py",
+          "language": "python",
+          "scope": [{"kind": "class_definition","name": "Example"},{"kind": "function","name": "sample"}],
+          "name": "sample",
+          "range": {"start": {"line": 2,"column": 5},"end": {"line": 11,"column": 22}},
+          "score": 8,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.py",
+          "language": "python",
+          "scope": [{"kind": "class_definition","name": "Example"},{"kind": "function","name": "sample"},{"kind": "lambda","name": "nested"}],
+          "name": "nested",
+          "range": {"start": {"line": 3,"column": 18},"end": {"line": 3,"column": 41}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.rs",
+          "language": "rust",
+          "scope": [{"kind": "function","name": "sample"}],
+          "name": "sample",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 12,"column": 2}},
+          "score": 8,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.rs",
+          "language": "rust",
+          "scope": [{"kind": "function","name": "sample"},{"kind": "closure","name": "nested"}],
+          "name": "nested",
+          "range": {"start": {"line": 2,"column": 18},"end": {"line": 2,"column": 42}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "sample"}],
+          "name": "sample",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 7,"column": 2}},
+          "score": 5,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "flow.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "sample"},{"kind": "arrow","name": "nested"}],
+          "name": "nested",
+          "range": {"start": {"line": 2,"column": 20},"end": {"line": 2,"column": 35}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "view.tsx",
+          "language": "tsx",
+          "scope": [{"kind": "arrow","name": "View"}],
+          "name": "View",
+          "range": {"start": {"line": 1,"column": 21},"end": {"line": 3,"column": 2}},
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  }
+]

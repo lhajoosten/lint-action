@@ -67,7 +67,7 @@ jobs:
         env:
           LINT_GATE_PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          python3 -I "$RUNNER_TEMP/lint-gate-tool/action/run.py" "$RUNNER_TEMP/lint-gate-build/release/lint-gate"
+          "$RUNNER_TEMP/lint-gate-build/release/lint-gate" github-scan
       - name: Record policy violations
         if: >-
           !cancelled() && inputs.publish-report && github.event_name == 'pull_request' &&
@@ -81,7 +81,7 @@ jobs:
         continue-on-error: true
         env:
           SCAN_REPORT: ${{ steps.scan.outputs.report }}
-        run: python3 -I "$RUNNER_TEMP/lint-gate-tool/action/app_report.py"
+        run: '"$RUNNER_TEMP/lint-gate-build/release/lint-gate" github-app-report'
       - name: Upload the App report
         if: '!cancelled() && steps.report.outcome == ''success'''
         continue-on-error: true

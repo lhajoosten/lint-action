@@ -24,14 +24,11 @@ jobs:
           cargo +1.88.0 clippy --locked --all-targets -- -D warnings
           cargo +1.88.0 package --locked
           package_version=$(cargo +1.88.0 metadata --locked --no-deps --format-version 1 |
-            python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')
+            jq -er '.packages[0].version')
           package_dir="$PWD/target/package/lint-gate-$package_version"
-          cargo +1.88.0 build --locked --release --manifest-path "$package_dir/Cargo.toml"
-          export LINT_GATE_BIN="$package_dir/target/release/lint-gate"
-          python3 tests/cli.py
-          python3 tests/action_test.py
-          python3 tests/publisher_test.py
-          revision=$(python3 tests/action_fixture.py build "$GITHUB_WORKSPACE" "$LINT_GATE_BIN")
+          cargo +1.88.0 test --locked --release --manifest-path "$package_dir/Cargo.toml"
+          revision=$(cargo +1.88.0 test --locked --release --manifest-path "$package_dir/Cargo.toml" \
+            --test action-fixture -- build "$GITHUB_WORKSPACE")
           printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
         id: prepare
       - name: Accept unchanged legacy debt
@@ -55,5 +52,8 @@ jobs:
           FAILING_REPORT: ${{ steps.failing.outputs.report }}
         run: |
           test "$FAILING_OUTCOME" = failure
-          python3 tests/action_fixture.py verify "$PASSING_REPORT" "$FAILING_REPORT"
-          python3 tests/publisher_test.py "$PASSING_REPORT" "$FAILING_REPORT"
+          cargo +1.88.0 test --locked --release --test action-fixture -- verify "$PASSING_REPORT" "$FAILING_REPORT"
+  reusable-scanner:
+    uses: ./.github/workflows/source-complexity.yml
+    with:
+      publish-report: true

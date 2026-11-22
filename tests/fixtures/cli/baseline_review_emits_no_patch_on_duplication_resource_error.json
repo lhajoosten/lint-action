@@ -1,0 +1,31 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 20}}"},
+      "$TREE0/a.ts": {"text": "function first() { uniqueA(); }"},
+      "$TREE0/b.ts": {"text": "function second() { uniqueB(); }"}
+    },
+    "args": ["baseline","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"scoring_version": 1,"entries": []},
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {"text": "{\"scoring_version\": 1, \"entries\": []}"},
+      "$TREE0/exhausted.ts": {"prefix": "function repeat() {","repeat": "ping();","count": 30000,"suffix": "}"}
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 2,
+    "stdout": null,
+    "stderr": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 3,
+      "files_skipped": 2,
+      "findings": [],
+      "diagnostics": [{"kind": "duplication_limit","message": "source duplication exceeded its analysis budget; narrow the source selection or increase minimum_tokens"}]
+    }
+  }
+]

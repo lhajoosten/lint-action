@@ -1,0 +1,78 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"rust\": 1, \"typescript\": 1, \"tsx\": 1, \"python\": 1}}"},
+      "$TREE0/choices.py": {
+        "text": "async def choices(items):\n    async for x in items:\n        if x:\n            continue\n        elif not x:\n            break\n    while items:\n        try:\n            raise ExceptionGroup(\"x\", [])\n        except* ValueError:\n            pass\n    return (a for a in items for b in items if a or b)\n"
+      },
+      "$TREE0/choices.rs": {
+        "text": "impl Item {\n    fn choices(&self, x: Option<bool>) {\n        let Some(y) = x else { return; };\n        while let Some(a) = x && a { break; }\n        for _ in [1] { continue; }\n        loop { break; }\n        if y || !y {} else if y {}\n        ignore!(if a || b {});\n    }\n}\n"
+      },
+      "$TREE0/choices.ts": {
+        "text": "class Example {\n    *choices({a = true} = {}) {\n        for (const item of []) {}\n        for (;;) { break; }\n        while (a) { break; }\n        do {} while (a);\n        try { a &&= a; a ||= a; a ??= false; }\n        catch { return this?.call?.()[0]?.[1]; }\n    }\n}\n"
+      },
+      "$TREE0/unicode.ts": {"text": "const é = \"if && ??\"; consume(() => false || true); // if\n"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 4,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "choices.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "choices"}],
+          "name": "choices",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 12,"column": 55}},
+          "score": 10,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "choices.rs",
+          "language": "rust",
+          "scope": [{"kind": "impl","name": "Item"},{"kind": "function","name": "choices"}],
+          "name": "choices",
+          "range": {"start": {"line": 2,"column": 5},"end": {"line": 9,"column": 6}},
+          "score": 9,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "choices.ts",
+          "language": "typescript",
+          "scope": [{"kind": "class_declaration","name": "Example"},{"kind": "method","name": "choices"}],
+          "name": "choices",
+          "range": {"start": {"line": 2,"column": 5},"end": {"line": 9,"column": 6}},
+          "score": 14,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "unicode.ts",
+          "language": "typescript",
+          "scope": [{"kind": "arrow","name": "<anonymous>"}],
+          "name": "<anonymous>",
+          "range": {"start": {"line": 1,"column": 32},"end": {"line": 1,"column": 51}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  }
+]

@@ -60,6 +60,11 @@ jobs:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           persist-credentials: false
+      - name: Build lint-gate publisher
+        if: inputs.enabled
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 build --locked --release --target-dir "$RUNNER_TEMP/lint-gate-build"
       - name: Create the repository-scoped installation token
         if: inputs.enabled
         id: installation
@@ -80,4 +85,4 @@ jobs:
           SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
           SCANNER_WORKFLOW: ${{ inputs.scanner-workflow }}
           ANALYSIS_JOB: ${{ inputs.analysis-job }}
-        run: python3 -Es action/publish.py
+        run: '"$RUNNER_TEMP/lint-gate-build/release/lint-gate" github-publish'
