@@ -1,4 +1,4 @@
 {
-  "mode": "report-only",
+  "mode": "baseline",
   "include": ["src/**/*.rs"]
 }
