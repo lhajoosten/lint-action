@@ -34,6 +34,10 @@ Release Log is public. GitHub's cross-repository sharing for private Actions cov
 
 3. Review the report-only findings. Generate and review the baseline at the chosen threshold, then switch the policy to `baseline`. Land both files together. The next PR will use that policy from its base commit. Release Log's Oxlint config currently leaves the complexity rule disabled, so the Action can own complexity enforcement without removing an existing rule.
 
+## Pull request comparison rehearsal
+
+The Action adapter ran locally with the advisory policy from Rolling Release's PR #159 base, `ee6220dc185b507afba454f53c5001ace9375aa3`, and the checked-out two-parent merge, `5031f16f4f35a13a7a7d39b0d8c016061c03590d`. It scanned 91 candidate files and returned the same 188 advisory findings and successful exit as the standalone candidate scan. The comparison counted 168 unchanged findings and surfaced two matched cyclomatic regressions, from 37 to 38 and from 16 to 20, both against a limit of 10. The summary included both source links for duplicate pairs. Ambiguous identities appeared as separate new or removed entries. [Rolling Release PR #159](https://github.com/lhajoosten/rolling-release/pull/159)
+
 ## Text-generation provider boundary
 
 Release Log's `text-generation-owns-ai-sdk` contract reserves direct dependencies on `ai` and `@ai-sdk/*` for `src/text-generation.ts`. Production TypeScript imports the project's text-generation API when it needs optional generation. The dependency-cruiser check covers resolved package subpaths, re-exports and type-only imports. The existing transitive planning and deterministic release-notes checks keep those paths offline. [Pilot issue](https://github.com/lhajoosten/lint-gate/issues/7) · [Release Log AI SDK ADR](https://github.com/lhajoosten/rolling-release/blob/14d3113d231d779c57170087ce2c374bf9c0c4b9/docs/adr/0002-ai-sdk-provider-integration.md)

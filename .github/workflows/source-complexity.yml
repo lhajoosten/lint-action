@@ -42,12 +42,15 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          git cat-file -e "$BASE_SHA^{commit}"
+          if ! git cat-file -e "$BASE_SHA^{commit}"; then
+            echo '**Comparison unavailable.** The exact PR base could not be read.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           if git cat-file -e "$BASE_SHA:.lint-action.json" 2>/dev/null; then
             echo 'available=true' >> "$GITHUB_OUTPUT"
           else
             echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo 'The PR check starts once .lint-action.json reaches the base branch.' >> "$GITHUB_STEP_SUMMARY"
+            echo '**Comparison unavailable.** The PR check starts once .lint-action.json reaches the base branch.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Record policy bootstrap
         if: inputs.publish-report && steps.policy.outputs.available == 'false'

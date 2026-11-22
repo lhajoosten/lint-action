@@ -1,5 +1,6 @@
 mod analyzer;
 mod cognitive;
+mod comparison;
 mod duplication;
 mod grammar;
 mod model;
@@ -9,13 +10,13 @@ mod scan;
 use crate::analyzer::Analysis;
 use crate::duplication::{Duplication, Match, Pair};
 use crate::grammar::ANONYMOUS;
-use crate::model::{Callable, Diagnostic, Identity, Position, Rule, SCORING_VERSION};
+use crate::model::{Callable, Diagnostic, ErrorKind, Identity, Position, Rule, SCORING_VERSION};
 use crate::policy::{BASELINE_FILE, Baseline, BaselineScores, CONFIG_FILE, Mode, Policy, Severity};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 #[derive(Parser)]
@@ -33,6 +34,20 @@ enum Command {
         settings: Settings,
         /// Optional files or directories relative to the scan root.
         paths: Vec<PathBuf>,
+    },
+    /// Compare full source trees under one trusted policy and return the candidate gate status.
+    Compare {
+        #[command(flatten)]
+        settings: Settings,
+        /// Base source root and default location of the trusted policy.
+        #[arg(long)]
+        base_root: Option<PathBuf>,
+        /// Optional base revision label for the materialized tree.
+        #[arg(long)]
+        base_revision: Option<String>,
+        /// Optional candidate revision label for the materialized tree.
+        #[arg(long)]
+        candidate_revision: Option<String>,
     },
     /// Write a baseline to stdout using the configured limits and selection.
     Baseline {
@@ -55,10 +70,10 @@ enum Command {
 
 #[derive(Args)]
 struct ConfigInput {
-    /// Source root. The default policy file is read from here.
+    /// Source root. In compare, this is the candidate.
     #[arg(long, default_value = ".")]
     root: PathBuf,
-    /// Policy file. Defaults to <root>/.lint-action.json.
+    /// Policy file. Defaults to .lint-action.json in the scan root, or the base root for compare.
     #[arg(long)]
     config: Option<PathBuf>,
 }
@@ -102,7 +117,7 @@ impl Settings {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Status {
     Reported,
@@ -159,6 +174,8 @@ struct Report {
     files_skipped: usize,
     findings: Vec<Finding>,
     diagnostics: Vec<Diagnostic>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comparison: Option<comparison::Comparison>,
 }
 
 impl Report {
@@ -171,6 +188,7 @@ impl Report {
             files_skipped: 0,
             findings: Vec::new(),
             diagnostics: Vec::new(),
+            comparison: None,
         }
     }
 
@@ -217,74 +235,146 @@ fn scan(
     if validate_only {
         return Ok(());
     }
-    let scan = scan::scan(&settings.input.root, paths, &policy);
-    report.files_scanned = scan.files_scanned;
-    report.files_skipped = scan.files_skipped;
-    let Analysis {
-        callables,
-        mut diagnostics,
-        scope_counts,
-        duplication,
-    } = scan.analysis;
-    let matches = duplication_matches(&policy, &duplication, &mut diagnostics);
-    report.diagnostics = diagnostics;
-    for mut callable in callables {
-        let severity = policy.severity(callable.rule);
-        if severity == Severity::Pass {
-            continue;
+    let mut scanned = scan::scan(&settings.input.root, paths, &policy);
+    let scored = ScoredTree::new(&mut scanned, &policy, report);
+    scored.add_findings(&policy, &baseline, report);
+    Ok(())
+}
+
+struct ScoredTree<'a> {
+    callables: Vec<Callable>,
+    scope_counts: &'a BTreeMap<Identity, usize>,
+    matches: Vec<Match<'a>>,
+    pairs: Vec<Option<Pair>>,
+}
+
+impl<'a> ScoredTree<'a> {
+    fn new(scanned: &'a mut scan::Scan, policy: &Policy, report: &mut Report) -> Self {
+        report.files_scanned = scanned.files_scanned;
+        report.files_skipped = scanned.files_skipped;
+        let analysis = &mut scanned.analysis;
+        let matches = duplication_matches(policy, &analysis.duplication, &mut analysis.diagnostics);
+        let pairs = match_pairs(&matches, &analysis.scope_counts);
+        report.diagnostics = std::mem::take(&mut analysis.diagnostics);
+        Self {
+            callables: std::mem::take(&mut analysis.callables),
+            scope_counts: &analysis.scope_counts,
+            matches,
+            pairs,
         }
-        let Some(limit) = policy.limit(callable.identity.language, callable.rule) else {
-            continue;
-        };
-        if callable.score <= u64::from(limit) {
-            continue;
-        }
-        let covered = policy.mode == Mode::Baseline
-            && baseline
-                .complexity
-                .get(&callable.rule)
-                .and_then(|scores| scores.get(&callable.identity))
-                .and_then(|&score| score)
-                .is_some_and(|score| score >= callable.score)
-            && unique(&callable.identity, &scope_counts);
-        callable
-            .contributions
-            .sort_by_key(|part| (part.range.start.line, part.range.start.column));
-        report.findings.push(Finding {
-            detail: Detail::Complexity(callable),
-            limit,
-            severity,
-            status: if severity == Severity::Warn {
-                Status::Reported
-            } else {
-                Status::for_mode(policy.mode, covered)
-            },
-        });
     }
-    if let Some(limit) = policy.duplication_minimum {
-        let pairs = match_pairs(&matches, &scope_counts);
-        for (found, pair) in matches.iter().zip(pairs) {
-            let severity = policy.severity(Rule::SourceDuplication);
-            if severity == Severity::Pass {
+
+    fn add_findings(self, policy: &Policy, baseline: &BaselineScores, report: &mut Report) {
+        for mut callable in self.callables {
+            let severity = policy.severity(callable.rule);
+            let Some(limit) = policy.limit(callable.identity.language, callable.rule) else {
+                continue;
+            };
+            if severity == Severity::Pass || callable.score <= u64::from(limit) {
                 continue;
             }
-            let covered = policy.mode == Mode::Baseline
-                && pair.is_some_and(|pair| baseline.covers(&pair, found));
+            let status = complexity_status(&callable, self.scope_counts, policy, baseline);
+            callable
+                .contributions
+                .sort_by_key(|part| (part.range.start.line, part.range.start.column));
             report.findings.push(Finding {
-                detail: Detail::Duplication(found.report()),
+                detail: Detail::Complexity(callable),
                 limit,
                 severity,
-                status: if severity == Severity::Warn {
-                    Status::Reported
-                } else {
-                    Status::for_mode(policy.mode, covered)
-                },
+                status,
             });
         }
+        if let Some(limit) = policy.duplication_minimum {
+            let severity = policy.severity(Rule::SourceDuplication);
+            for (found, pair) in self.matches.iter().zip(&self.pairs) {
+                report.findings.push(Finding {
+                    detail: Detail::Duplication(found.report()),
+                    limit,
+                    severity,
+                    status: duplication_status(found, pair.as_ref(), policy, baseline),
+                });
+            }
+        }
+        report
+            .findings
+            .sort_by(|left, right| left.detail.location().cmp(&right.detail.location()));
     }
-    report
-        .findings
-        .sort_by(|left, right| left.detail.location().cmp(&right.detail.location()));
+}
+
+fn complexity_status(
+    callable: &Callable,
+    scope_counts: &BTreeMap<Identity, usize>,
+    policy: &Policy,
+    baseline: &BaselineScores,
+) -> Status {
+    if policy.severity(callable.rule) == Severity::Warn {
+        return Status::Reported;
+    }
+    let covered = policy.mode == Mode::Baseline
+        && baseline
+            .complexity
+            .get(&callable.rule)
+            .and_then(|scores| scores.get(&callable.identity))
+            .and_then(|&score| score)
+            .is_some_and(|score| score >= callable.score)
+        && unique(&callable.identity, scope_counts);
+    Status::for_mode(policy.mode, covered)
+}
+
+fn duplication_status(
+    found: &Match<'_>,
+    pair: Option<&Pair>,
+    policy: &Policy,
+    baseline: &BaselineScores,
+) -> Status {
+    if policy.severity(Rule::SourceDuplication) == Severity::Warn {
+        return Status::Reported;
+    }
+    let covered =
+        policy.mode == Mode::Baseline && pair.is_some_and(|pair| baseline.covers(pair, found));
+    Status::for_mode(policy.mode, covered)
+}
+
+fn compare(
+    mut settings: Settings,
+    base_root: Option<&Path>,
+    comparison: &mut comparison::Comparison,
+    report: &mut Report,
+) -> Result<(), Diagnostic> {
+    if settings.input.config.is_none() {
+        settings.input.config = Some(
+            base_root
+                .ok_or_else(|| {
+                    Diagnostic::new(
+                        ErrorKind::InvalidConfig,
+                        None,
+                        "compare requires a trusted --config or --base-root",
+                    )
+                })?
+                .join(CONFIG_FILE),
+        );
+    }
+    let policy = settings.input.policy()?;
+    report.mode = Some(policy.mode);
+    let baseline = settings.baseline(policy.mode)?;
+    let mut scanned = scan::scan(&settings.input.root, &[], &policy);
+    let candidate = ScoredTree::new(&mut scanned, &policy, report);
+    if !report.diagnostics.is_empty() {
+        comparison.unavailable("candidate_analysis_failed");
+    } else if let Some(root) = base_root {
+        let mut base_report = Report::new();
+        let mut scanned = scan::scan(root, &[], &policy);
+        let base = ScoredTree::new(&mut scanned, &policy, &mut base_report);
+        if base_report.diagnostics.is_empty() {
+            comparison.compare(&base, &candidate, &policy, &baseline);
+        } else {
+            comparison.unavailable("base_analysis_failed");
+            comparison.base_diagnostics = base_report.diagnostics;
+        }
+    } else {
+        comparison.unavailable("base_root_unavailable");
+    }
+    candidate.add_findings(&policy, &baseline, report);
     Ok(())
 }
 
@@ -508,7 +598,8 @@ fn review_baseline(
             }
             match found_by_pair.get(&pair).map(Vec::as_slice) {
                 Some([(found, score)])
-                    if *score < entry.score && found.is_part_of(&entry.tokens) =>
+                    if *score < entry.score
+                        && found.is_part_of(entry.tokens.iter().map(String::as_str)) =>
                 {
                     let tokens: Vec<_> = found.tokens().map(str::to_owned).collect();
                     operations.push(patch_value(
@@ -628,6 +719,21 @@ fn run(command: Command) -> io::Result<u8> {
             if let Err(diagnostic) = scan(&settings, &paths, &mut report, false) {
                 report.diagnostics.push(diagnostic);
             }
+        }
+        Command::Compare {
+            settings,
+            base_root,
+            base_revision,
+            candidate_revision,
+        } => {
+            let mut comparison = comparison::Comparison::new(base_revision, candidate_revision);
+            if let Err(diagnostic) =
+                compare(settings, base_root.as_deref(), &mut comparison, &mut report)
+            {
+                comparison.unavailable("candidate_analysis_failed");
+                report.diagnostics.push(diagnostic);
+            }
+            report.comparison = Some(comparison);
         }
         Command::Validate { settings } => {
             if let Err(diagnostic) = scan(&settings, &[], &mut report, true) {

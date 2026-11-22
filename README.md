@@ -118,11 +118,28 @@ For pull requests, including forks, the Action scans the checkout with policy fr
 
 The Action emits up to ten GitHub annotations and a job summary under **lint-gate quality gate**. Its `report` output is the absolute path to the JSON report on the runner. For private repository sharing, enable access for eligible consumer repositories in Actions settings. [GitHub private Action access](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#managing-access-for-a-private-repository)
 
-To reproduce PR results, materialize the base policy and its baseline in a temporary directory, then run `lint-gate scan --root /path/to/candidate --config /path/to/trusted/.lint-action.json`.
+### Compare a pull request locally
+
+Materialize the exact PR base and the candidate checked out in CI. Set `CANDIDATE_SHA` to the PR merge commit when reproducing the reusable workflow.
+
+```bash
+git worktree add --detach /path/to/base "$BASE_SHA"
+git worktree add --detach /path/to/candidate "$CANDIDATE_SHA"
+lint-gate compare --base-root /path/to/base --root /path/to/candidate \
+  --base-revision "$BASE_SHA" --candidate-revision "$CANDIDATE_SHA"
+```
+
+Comparison uses the policy and baseline from the base directory for both scans. Use `--config` and optionally `--baseline` to reproduce a trusted policy override. The optional revision arguments label the trees you provide. The command scans the full policy-selected workspace, including unchanged code that can be part of a duplicate.
+
+The Actions summary shows new and worsened findings before improvements, fixes, and removals. It counts unchanged findings and displays both locations of each duplicate. The full candidate report remains available through the Action's `report` output. The composite Action labels a clean candidate checkout with its HEAD SHA. A checkout with local changes still uses the working tree for the gate.
 
 ## Report contract
 
 `scan` writes JSON with `format_version: 2`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. All findings include a stable rule ID, severity, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by the first occurrence's path and start position, then by rule. Complexity findings retain the source path, language, callable name, scope, and range. Cognitive findings include the scoring contributions. Duplication findings carry two locations in `occurrences`, and `limit` is an inclusive minimum. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, empty scans, and the duplication analysis budget.
+
+`compare` adds a `comparison` object with its own `format_version: 1`, the base and candidate revisions when supplied, and a coverage status. A complete comparison includes an `unchanged` count and an ordered `changes` list. Each change has a category, match status, rule, limit, and previous and current observations when available. Observations include scores, locations, and enforcement disposition. A passing score has a null disposition. A callable crossing the limit is `new`, a callable returning to the limit or below is `fixed`, and a finding without a trusted counterpart is listed as `new` or `removed`. Ambiguous entries are marked and sorted after other entries within their category. Changes between two passing scores are omitted.
+
+When analysis is incomplete, the comparison reports `unavailable` with a reason and any base diagnostics. With an explicit trusted `--config`, you can omit `--base-root` and still receive the full candidate report. The exit code always reflects the candidate gate.
 
 | Exit | Meaning |
 | --- | --- |
