@@ -116,7 +116,7 @@ See the [cyclomatic scoring contract](docs/rules/cyclomatic-complexity.md), the 
 
 ## Rolling Release
 
-Configure `RELEASE_APP_ID` and `RELEASE_BOT_USER_ID` as Actions variables and `RELEASE_APP_PRIVATE_KEY` as an Actions secret. The existing `RELEASE_LOG_PRIVATE_KEY` secret is accepted as a fallback. Merged pull requests get a read-only preview and a separate, pinned release writer. Set `RELEASE_LOG_WRITE_ENABLED=false` to pause writes. Manual dispatch runs the read-only preflight.
+Configure `RELEASE_APP_ID` and `RELEASE_BOT_USER_ID` as Actions variables and `RELEASE_APP_PRIVATE_KEY` as an Actions secret. The existing `RELEASE_LOG_PRIVATE_KEY` secret is accepted as a fallback. The caller pins one Rolling Release workflow revision for the read-only preview and separate release writer. Set `RELEASE_LOG_WRITE_ENABLED=false` to pause merge writes. Manual dispatch on `main` runs a read-only preview.
 
 ## Maintain the rules
 
