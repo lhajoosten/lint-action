@@ -1,0 +1,211 @@
+{
+  "scoring_version": 1,
+  "entries": [
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/analyzer.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "function",
+            "name": "analyze"
+          }
+        ]
+      },
+      "score": 27
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/cognitive.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "function",
+            "name": "score"
+          }
+        ]
+      },
+      "score": 20
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/comparison.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "impl",
+            "name": "Comparison"
+          },
+          {
+            "kind": "function",
+            "name": "compare"
+          }
+        ]
+      },
+      "score": 20
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/comparison.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "impl",
+            "name": "Comparison"
+          },
+          {
+            "kind": "function",
+            "name": "compare_duplicates"
+          }
+        ]
+      },
+      "score": 15
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/duplication.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "function",
+            "name": "find"
+          }
+        ]
+      },
+      "score": 16
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/grammar.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "impl",
+            "name": "Language"
+          },
+          {
+            "kind": "function",
+            "name": "callable"
+          }
+        ]
+      },
+      "score": 13
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/grammar.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "impl",
+            "name": "Language"
+          },
+          {
+            "kind": "function",
+            "name": "decision"
+          }
+        ]
+      },
+      "score": 25
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/main.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "function",
+            "name": "review_baseline"
+          }
+        ]
+      },
+      "score": 44
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/main.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "function",
+            "name": "run"
+          }
+        ]
+      },
+      "score": 20
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/policy.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "impl",
+            "name": "Baseline"
+          },
+          {
+            "kind": "function",
+            "name": "read"
+          }
+        ]
+      },
+      "score": 14
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/policy.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "impl",
+            "name": "Policy"
+          },
+          {
+            "kind": "function",
+            "name": "load"
+          }
+        ]
+      },
+      "score": 13
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/scan.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "function",
+            "name": "scan"
+          }
+        ]
+      },
+      "score": 21
+    },
+    {
+      "rule": "cyclomatic-complexity",
+      "identity": {
+        "path": "src/scan.rs",
+        "language": "rust",
+        "scope": [
+          {
+            "kind": "function",
+            "name": "scan_file"
+          }
+        ]
+      },
+      "score": 13
+    }
+  ]
+}
