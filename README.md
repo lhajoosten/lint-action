@@ -1,5 +1,7 @@
 # lint-gate
 
+<img width="2172" height="724" alt="image" src="https://github.com/user-attachments/assets/ce155939-1d71-4150-8afa-b5ba263b1e34" />
+
 A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, and cognitive complexity and opt-in source duplication in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
 
 ## Run locally
