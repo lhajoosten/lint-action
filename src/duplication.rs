@@ -141,6 +141,10 @@ pub struct Match<'a> {
 }
 
 impl Match<'_> {
+    pub fn anchors(&self) -> [Option<&Identity>; 2] {
+        [self.anchor(0), self.anchor(1)]
+    }
+
     pub fn report(&self) -> Duplication {
         Duplication {
             rule: Rule::SourceDuplication,
