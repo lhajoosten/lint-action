@@ -54,6 +54,7 @@ jobs:
           test "$FAILING_OUTCOME" = failure
           cargo +1.88.0 test --locked --release --test action-fixture -- verify "$PASSING_REPORT" "$FAILING_REPORT"
   reusable-scanner:
+    if: github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/source-complexity.yml
     with:
       publish-report: true
