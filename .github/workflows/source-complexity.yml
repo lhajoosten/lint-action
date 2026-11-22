@@ -2,6 +2,11 @@ name: Source complexity
 
 on:
   workflow_call:
+    inputs:
+      publish-report:
+        description: Upload a bounded report for the optional GitHub App publisher
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -15,8 +20,20 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - name: Record candidate ${{ github.event.pull_request.number }} ${{ github.sha }} ${{ github.event.pull_request.base.sha }}
+        if: github.event_name == 'pull_request' && inputs.publish-report
+        run: 'true'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: lint-gate-tool
+          persist-credentials: false
+      - name: Move the scanner outside the candidate workspace
+        run: mv lint-gate-tool "$RUNNER_TEMP/lint-gate-tool"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Check whether the PR base has a policy
@@ -29,8 +46,45 @@ jobs:
           if git cat-file -e "$BASE_SHA:.lint-action.json" 2>/dev/null; then
             echo 'available=true' >> "$GITHUB_OUTPUT"
           else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
             echo 'The PR check starts once .lint-action.json reaches the base branch.' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Scan source
+      - name: Record policy bootstrap
+        if: inputs.publish-report && steps.policy.outputs.available == 'false'
+        run: 'true'
+      - name: Build lint-gate
         if: github.event_name != 'pull_request' || steps.policy.outputs.available == 'true'
-        uses: lhajoosten/lint-gate@cf1ece6767fbb5d86f21f3f979e44af6bebe3b71
+        working-directory: ${{ runner.temp }}/lint-gate-tool
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 build --locked --release --target-dir "$RUNNER_TEMP/lint-gate-build"
+      - name: Scan source
+        id: scan
+        if: github.event_name != 'pull_request' || steps.policy.outputs.available == 'true'
+        env:
+          LINT_GATE_PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          python3 -I "$RUNNER_TEMP/lint-gate-tool/action/run.py" "$RUNNER_TEMP/lint-gate-build/release/lint-gate"
+      - name: Record policy violations
+        if: >-
+          !cancelled() && inputs.publish-report && github.event_name == 'pull_request' &&
+          steps.scan.outcome == 'failure' && steps.scan.outputs.outcome == '1'
+        run: 'true'
+      - name: Normalize the App report
+        id: report
+        if: >-
+          !cancelled() && inputs.publish-report && github.event_name == 'pull_request' &&
+          steps.scan.outputs.report != ''
+        continue-on-error: true
+        env:
+          SCAN_REPORT: ${{ steps.scan.outputs.report }}
+        run: python3 -I "$RUNNER_TEMP/lint-gate-tool/action/app_report.py"
+      - name: Upload the App report
+        if: '!cancelled() && steps.report.outcome == ''success'''
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lint-gate-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lint-gate-app/report.json
+          if-no-files-found: error
+          retention-days: 7
