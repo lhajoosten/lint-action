@@ -484,6 +484,7 @@ fn bootstrap_incomplete_blocking_and_unattachable_checks_keep_their_outcomes() {
     {
         let mut state = mock.state.lock().unwrap();
         assert_eq!(state.check["output"]["title"], "Analysis incomplete");
+        assert_eq!(state.check["conclusion"], "failure");
         state.blocking = true;
         state.run["run_attempt"] = json!(3);
     }
@@ -491,6 +492,7 @@ fn bootstrap_incomplete_blocking_and_unattachable_checks_keep_their_outcomes() {
     {
         let mut state = mock.state.lock().unwrap();
         assert_eq!(state.check["output"]["title"], "Blocking policy findings");
+        assert_eq!(state.check["conclusion"], "failure");
         state.rejected = true;
         state.run["run_attempt"] = json!(4);
     }

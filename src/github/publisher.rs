@@ -374,8 +374,8 @@ fn check_output(
     let (mut title, mut conclusion) = match outcome {
         Outcome::Bootstrap => ("Policy bootstrap", "skipped"),
         Outcome::Passed => ("Clean", "success"),
-        Outcome::Blocking => ("Blocking policy findings", "neutral"),
-        Outcome::Incomplete => ("Analysis incomplete", "neutral"),
+        Outcome::Blocking => ("Blocking policy findings", "failure"),
+        Outcome::Incomplete => ("Analysis incomplete", "failure"),
     };
     let mut summary = vec![
         format!("[Open the analysis run]({details_url})"),
@@ -620,9 +620,9 @@ mod tests {
                 Outcome::Blocking,
                 Some("blocking"),
                 "Blocking policy findings",
-                "neutral",
+                "failure",
             ),
-            (Outcome::Incomplete, None, "Analysis incomplete", "neutral"),
+            (Outcome::Incomplete, None, "Analysis incomplete", "failure"),
         ] {
             let mut legacy = existing_report();
             if let Some(count) = count {

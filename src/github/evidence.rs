@@ -79,14 +79,14 @@ pub fn rescan(analyzer: &Path) -> Result<u8> {
 }
 
 pub fn bounded_json(path: &Path) -> Result<(Value, Vec<u8>)> {
-    let mut raw = Vec::new();
+    let mut bytes = Vec::new();
     File::open(path)?
         .take(LIMIT as u64 + 1)
-        .read_to_end(&mut raw)?;
-    if raw.len() > LIMIT {
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > LIMIT {
         return Err("trusted scan evidence exceeded its size limit".into());
     }
-    Ok((serde_json::from_slice(&raw)?, raw))
+    Ok((serde_json::from_slice(&bytes)?, bytes))
 }
 
 pub fn findings(report: &Value) -> Option<&[Value]> {
@@ -149,7 +149,7 @@ fn blob(repository: &Path, revision: &str, path: &str) -> Result<Option<Vec<u8>>
 }
 
 pub fn stage() -> Result<u8> {
-    let (report, raw) = bounded_json(&env_path("SCAN_REPORT")?)?;
+    let (report, bytes) = bounded_json(&env_path("SCAN_REPORT")?)?;
     let findings = findings(&report).ok_or("trusted scan report is incomplete or invalid")?;
     let workspace = fs::canonicalize(env_path("GITHUB_WORKSPACE")?)?;
     let candidate = repository::path_within(&workspace)?;
@@ -183,7 +183,7 @@ pub fn stage() -> Result<u8> {
     };
     let output = env_path("RUNNER_TEMP")?.join("lint-gate-findings");
     fs::create_dir_all(&output)?;
-    fs::write(output.join("report.json"), raw)?;
+    fs::write(output.join("report.json"), bytes)?;
     fs::write(output.join("anchors.json"), serde_json::to_vec(&manifest)?)?;
     append(
         "GITHUB_OUTPUT",

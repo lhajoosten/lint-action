@@ -1,6 +1,6 @@
 # Publish Lint Gate checks with a GitHub App
 
-The optional publisher adds **Lint Gate (advisory)** under your App's identity. Require the native Actions analysis job in your ruleset for policy enforcement; the advisory App check is not a substitute. The App check links to the exact Actions run attempt and reports clean scans, warnings, blocking policy findings, incomplete analysis, and policy bootstrap. The advisory check uses a neutral conclusion for warnings, blocking findings, and incomplete results.
+The optional publisher adds **Lint Gate (advisory)** under your App's identity. Require the native Actions analysis job in your ruleset for policy enforcement; the advisory App check is not a substitute. The App check links to the exact Actions run attempt and reports clean scans, warnings, blocking policy findings, incomplete analysis, and policy bootstrap. The advisory check uses a neutral conclusion for warnings and a failure conclusion for blocking findings and incomplete analysis.
 
 ## Set up the App
 
