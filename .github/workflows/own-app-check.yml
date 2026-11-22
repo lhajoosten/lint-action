@@ -17,6 +17,6 @@ jobs:
       enabled: ${{ vars.LINT_GATE_APP_PUBLISH == 'true' }}
       app-id: ${{ vars.LINT_GATE_APP_ID }}
       source-workflow: own-source-complexity.yml
-      scanner-workflow: lhajoosten/lint-gate/.github/workflows/source-complexity.yml@refs/heads/main
+      scanner-workflow: lhajoosten/lint-gate/.github/workflows/source-complexity.yml@c16e2bc970050f33a95663066371eb7af5b812ca
     secrets:
       app-private-key: ${{ secrets.LINT_GATE_APP_PRIVATE_KEY }}
