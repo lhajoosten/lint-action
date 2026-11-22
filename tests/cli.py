@@ -14,6 +14,12 @@ POLICY = ".lint-action.json"
 BASELINE = ".lint-action-baseline.json"
 
 
+def span(item):
+    start = item["range"]["start"]
+    end = item["range"]["end"]
+    return (start["line"], start["column"]), (end["line"], end["column"])
+
+
 class CliTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -93,6 +99,43 @@ function another() { prepare(item); send(item); }
             self.assertEqual(self.invoke(0)[0]["findings"], [])
         self.duplication(minimum=2**32 - 1)
         self.assertEqual(self.invoke(0)[0]["findings"], [])
+
+    def test_source_duplication_preserves_whitespace_inside_jsx_text(self):
+        # The body has 13 tokens: record ( ) ; return < p > [Hello world] </ p > ;
+        # At that minimum, a shorter run on either side of the JSX text cannot qualify.
+        self.duplication(minimum=13)
+        original = """function original() {
+  record();
+  return <p>Hello world</p>;
+}
+"""
+        control = original.replace("function original", "function copy")
+        formatted = """function copy() {
+    record ( );
+    return <p>Hello world</p> ;
+}
+"""
+        self.write("a.tsx", original)
+        original_occurrence = ("a.tsx", ((2, 3), (3, 29)))
+        cases = [
+            ("matching control", control, [original_occurrence, ("b.tsx", ((2, 3), (3, 29)))]),
+            ("inter-token whitespace", formatted, [
+                original_occurrence, ("b.tsx", ((2, 5), (3, 32))),
+            ]),
+            ("JSX text whitespace", formatted.replace("Hello world", "Hello  world"), None),
+        ]
+        for variant, source, occurrences in cases:
+            with self.subTest(variant=variant):
+                self.write("b.tsx", source)
+                report, _ = self.invoke(0)
+                self.assertEqual(report["diagnostics"], [])
+                self.assertEqual(report["files_scanned"], 2)
+                expected = [] if occurrences is None else [("source-duplication", 13, occurrences)]
+                self.assertEqual([
+                    (item["rule"], item["score"],
+                     [(occurrence["path"], span(occurrence)) for occurrence in item["occurrences"]])
+                    for item in report["findings"]
+                ], expected)
 
     def test_source_duplication_baseline_is_pair_and_content_specific(self):
         self.duplication("baseline")
@@ -182,12 +225,8 @@ function another() { prepare(item); send(item); }
             ("view.tsx", "View", 3, (1, 21), (3, 2)),
         ]
 
-        def point(item, edge):
-            location = item["range"][edge]
-            return location["line"], location["column"]
-
         self.assertEqual([
-            (item["path"], item["name"], item["score"], point(item, "start"), point(item, "end"))
+            (item["path"], item["name"], item["score"], *span(item))
             for item in report["findings"]
         ], expected)
         for item in report["findings"]:
@@ -196,6 +235,30 @@ function another() { prepare(item); send(item); }
         self.assertEqual(report["findings"][1]["scope"][-2]["name"], "sample")
         paths = [path.name for path in self.root.iterdir()]
         self.assertEqual(self.invoke(0, "scan", "--", *reversed(paths), "flow.ts")[1], raw)
+
+    def test_python_match_guards_and_nested_comprehensions(self):
+        self.config(limits={"python": 1})
+        self.write("guards.py", """def collect(groups, allow):
+    match groups:
+        case [first, *rest] if first and (rest or allow):
+            def keep(item):
+                return any(part for part in item if part)
+            return [[item for item in group if keep(item)] for group in rest if group]
+        case _:
+            return []
+""")
+        report, _ = self.invoke(0)
+        self.assertEqual(report["diagnostics"], [])
+        # collect: 1 base + 2 cases + 1 guard + and + or + 2 comprehension fors + 2 ifs.
+        # keep: 1 base + 1 generator for + 1 generator if.
+        self.assertEqual([
+            (item["rule"], item["path"], tuple(scope["name"] for scope in item["scope"]),
+             item["score"], span(item))
+            for item in report["findings"]
+        ], [
+            ("cyclomatic-complexity", "guards.py", ("collect",), 10, ((1, 1), (8, 22))),
+            ("cyclomatic-complexity", "guards.py", ("collect", "keep"), 3, ((4, 13), (5, 58))),
+        ])
 
     def test_additional_grammar_constructs(self):
         self.write("choices.rs", """impl Item {
@@ -308,6 +371,34 @@ function host(a: boolean) {
         ]
         self.assertEqual([(p["construct"], p["points"]) for p in finding["contributions"]], expected)
         self.assertEqual(finding["score"], 24)
+
+    def test_typescript_optional_hops_and_logical_runs(self):
+        self.config(limits={"typescript": 1}, cognitive_limits={"typescript": 1})
+        self.write("optional.ts", """function load() {
+    return ((source?.client?.load?.() && (ready && cached)) || backup) ?? select(value ?? fallback);
+}
+""")
+        report, _ = self.invoke(0)
+        self.assertEqual(report["diagnostics"], [])
+        # Cyclomatic: 1 base + 3 optional hops + 2 && + 1 || + 2 ??.
+        # Cognitive: one && run across parentheses, one || run, and two ?? runs.
+        # The call separates the argument's ?? from the surrounding expression.
+        self.assertEqual([
+            (item["rule"], item["path"], item["name"], item["score"], span(item))
+            for item in report["findings"]
+        ], [
+            ("cyclomatic-complexity", "optional.ts", "load", 9, ((1, 1), (3, 2))),
+            ("cognitive-complexity", "optional.ts", "load", 4, ((1, 1), (3, 2))),
+        ])
+        self.assertEqual([
+            (part["construct"], part["points"], part["nesting"], span(part))
+            for part in report["findings"][1]["contributions"]
+        ], [
+            ("&&", 1, 0, ((2, 39), (2, 41))),
+            ("||", 1, 0, ((2, 61), (2, 63))),
+            ("??", 1, 0, ((2, 72), (2, 74))),
+            ("??", 1, 0, ((2, 88), (2, 90))),
+        ])
 
     def test_both_defaults_are_twelve_and_overrides_are_independent(self):
         branches = "if (x) work();"
