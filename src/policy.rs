@@ -254,7 +254,7 @@ impl BaselineScores {
         self.duplication
             .get(pair)
             .and_then(Option::as_ref)
-            .is_some_and(|entry| found.is_part_of(&entry.tokens))
+            .is_some_and(|entry| found.is_part_of(entry.tokens.iter().map(String::as_str)))
     }
 }
 
