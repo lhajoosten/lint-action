@@ -281,6 +281,38 @@ class PublisherTests(unittest.TestCase):
         self.assertIn("thread limit reached", self.api.issue_comments[0]["body"])
         self.assertIn("verified scan", self.api.issue_comments[0]["body"])
 
+    def test_moved_threads_are_replaced_at_the_thread_limit(self):
+        findings = [dict(finding(), name=f"fresh_{index}") for index in range(50)]
+        self.api.report = report(findings)
+        self.api.steps["Scan source"] = "failure"
+        self.api.steps["Record policy violations"] = "success"
+        self.api.receive()
+
+        self.api.run["run_attempt"] = 2
+        self.api.report = report([
+            dict(item, range=finding(line=2)["range"]) for item in findings
+        ])
+        self.api.receive()
+
+        active = [
+            comment["line"] for comment, thread in zip(self.api.review_comments, self.api.threads)
+            if not thread["isResolved"]
+        ]
+        self.assertEqual(active, [2] * 50)
+        self.assertNotIn("thread limit reached", self.api.issue_comments[0]["body"])
+
+    def test_ambiguous_complexity_findings_get_distinct_threads(self):
+        findings = [
+            dict(finding(line=line), name="<anonymous>") for line in (1, 2)
+        ]
+        self.api.report = report(findings)
+        self.api.steps["Scan source"] = "failure"
+        self.api.steps["Record policy violations"] = "success"
+        self.api.receive()
+        self.api.receive()
+
+        self.assertEqual([comment["line"] for comment in self.api.review_comments], [1, 2])
+
     def test_baseline_entry_creates_no_required_conversation(self):
         self.api.report = report([finding("baselined")])
         self.api.receive()

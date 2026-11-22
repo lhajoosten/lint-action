@@ -1,5 +1,6 @@
 """Publish PR conversations from an independently verified pull_request scan."""
 
+from collections import Counter
 import hashlib
 import json
 import os
@@ -377,17 +378,26 @@ def feedback_order_marker(order):
 def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, details_url,
                        report, verify_current, compatible_paths, order):
     findings = report["findings"]
-    blockers = {}
+    blocking = []
     summary_items = []
     files = list(api.pages(f"/pulls/{number}/files", "files"))
     for finding in findings:
         if finding["status"] == "baselined":
             continue
-        identity, _ = finding_identity(finding)
         if finding["status"] == "reported":
             summary_items.append(("Warning", finding))
         else:
-            blockers[identity] = finding
+            identity, _ = finding_identity(finding)
+            blocking.append((identity, finding))
+
+    identity_counts = Counter(identity for identity, _ in blocking)
+    blockers = {}
+    for identity, finding in blocking:
+        if identity_counts[identity] > 1 and finding["rule"] != "source-duplication":
+            # Keep location-independent IDs for unique callables and use ranges only to break ties.
+            identity_and_range = json.dumps([identity, finding["range"]], sort_keys=True)
+            identity = hashlib.sha256(identity_and_range.encode()).hexdigest()
+        blockers[identity] = finding
 
     rest_comments = list(api.pages(f"/pulls/{number}/comments", "comments"))
     issue_comments = list(api.pages(f"/issues/{number}/comments", "comments"))
@@ -451,26 +461,21 @@ def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, detail
                         f"{':' + str(anchor[2]) if anchor[0] == 'line' else ''}; score {code(finding['score'])}, "
                         f"limit {code(finding['limit'])}.\n\n[Open the verified scan]({details_url})")
                 if thread["isResolved"]:
+                    if active_count >= MAX_INLINE_THREADS:
+                        summary_items.append(("Blocking error (thread limit reached)", finding))
+                        continue
                     verify_current()
                     set_thread_resolved(api, thread["id"], False)
+                    active_count += 1
                 if existing.get("body") != body:
                     verify_current()
                     api.json(f"/pulls/comments/{existing['id']}", "PATCH", {"body": body})
-                continue
-            if not anchor:
-                if not thread["isResolved"]:
-                    verify_current()
-                    set_thread_resolved(api, thread["id"], True)
-                summary_items.append(("Unanchored blocking error", finding))
-                continue
-            if active_count >= MAX_INLINE_THREADS:
-                summary_items.append(("Blocking error (thread limit reached)", finding))
                 continue
             if not thread["isResolved"]:
                 verify_current()
                 set_thread_resolved(api, thread["id"], True)
                 active_count -= 1
-        elif active_count >= MAX_INLINE_THREADS:
+        if anchor and active_count >= MAX_INLINE_THREADS:
             summary_items.append(("Blocking error (thread limit reached)", finding))
             continue
         if anchor:
