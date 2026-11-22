@@ -56,6 +56,8 @@ lint-gate baseline > .lint-action-baseline.json.new &&
 
 Set `mode` to `baseline` and check the policy and baseline into the base branch. The CLI reads `.lint-action-baseline.json` beside the policy unless you pass `--baseline`. A complexity baseline entry records the rule ID, path, language, and qualified callable identity without line numbers. Entries from earlier versions that omit the rule ID apply to cyclomatic complexity. Moving to another path or named scope, changing the callable identity, or introducing ambiguous names prevents a waiver. A directly returned callable uses a return-site identity within its enclosing scope. Other unbound anonymous callables are reported and cannot inherit waivers. Only unique, over-limit callables with stable identities are included when generating a baseline. Remove stale entries during deliberate baseline review.
 
+After an accepted finding improves, preview safe reductions with `lint-gate baseline-review --root /path/to/project`. It requires the existing baseline and a complete successful scan under the selected policy. The command writes a deterministic RFC 6902 JSON Patch to stdout, leaves the baseline file untouched, and explains preserved entries on stderr. An empty array (`[]`) means there are no safe changes. Review and apply the patch explicitly before committing the baseline; new, worsened, inactive, excluded, or ambiguous exceptions are preserved.
+
 Use `lint-gate validate --root /path/to/project` to check candidate policy and its baseline separately from enforcement.
 
 ## Add to a workflow

@@ -119,7 +119,12 @@ impl Policy {
     }
 
     pub fn includes(&self, path: &Path) -> bool {
-        self.include.is_match(path) && !self.exclude.is_match(path)
+        self.include.is_match(path)
+            && !self.exclude.is_match(path)
+            && !path
+                .ancestors()
+                .skip(1)
+                .any(|parent| !parent.as_os_str().is_empty() && self.excludes_directory(parent))
     }
 
     pub fn excludes_directory(&self, path: &Path) -> bool {
@@ -168,30 +173,30 @@ fn compile_globs(patterns: &[String]) -> Result<GlobSet, String> {
     builder.build().map_err(|error| error.to_string())
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Baseline {
-    scoring_version: u32,
-    entries: Vec<Entry>,
+    pub(crate) scoring_version: u32,
+    pub(crate) entries: Vec<Entry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    duplication_entries: Vec<DuplicationEntry>,
+    pub(crate) duplication_entries: Vec<DuplicationEntry>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Entry {
+pub(crate) struct Entry {
     #[serde(default)]
-    rule: Rule,
-    identity: Identity,
-    score: u64,
+    pub(crate) rule: Rule,
+    pub(crate) identity: Identity,
+    pub(crate) score: u64,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct DuplicationEntry {
-    occurrences: Pair,
-    score: usize,
-    tokens: Vec<String>,
+pub(crate) struct DuplicationEntry {
+    pub(crate) occurrences: Pair,
+    pub(crate) score: usize,
+    pub(crate) tokens: Vec<String>,
 }
 
 #[derive(Default)]
@@ -223,6 +228,10 @@ fn valid_identity(identity: &Identity) -> bool {
 
 impl Baseline {
     pub fn load(path: &Path) -> Result<BaselineScores, Diagnostic> {
+        Self::load_review(path).map(|(_, scores)| scores)
+    }
+
+    pub fn load_review(path: &Path) -> Result<(Self, BaselineScores), Diagnostic> {
         let invalid = |message: String| policy_error(ErrorKind::InvalidBaseline, path, message);
         let baseline: Self = read_json(path, MAX_BASELINE_BYTES).map_err(invalid)?;
         if baseline.scoring_version != SCORING_VERSION {
@@ -236,7 +245,7 @@ impl Baseline {
             rule,
             identity,
             score,
-        } in baseline.entries
+        } in baseline.entries.iter().cloned()
         {
             if !valid_identity(&identity)
                 || !rule.supports(identity.language)
@@ -256,7 +265,7 @@ impl Baseline {
                 .and_modify(|value| *value = None)
                 .or_insert(Some(score));
         }
-        for mut entry in baseline.duplication_entries {
+        for mut entry in baseline.duplication_entries.iter().cloned() {
             let [left, right] = &entry.occurrences;
             if left == right
                 || entry.occurrences.iter().any(|identity| {
@@ -280,7 +289,7 @@ impl Baseline {
                 .and_modify(|value| *value = None)
                 .or_insert(Some(entry));
         }
-        Ok(scores)
+        Ok((baseline, scores))
     }
 
     pub fn generate<'a>(

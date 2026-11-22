@@ -416,6 +416,7 @@ function host(a: boolean) {
         self.write("debt.py", original)
         self.config("baseline", {"python": 1})
         self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "invalid_baseline")
+
         baseline, _ = self.invoke(0, "baseline")
         self.assertEqual(baseline["entries"], [{
             "rule": "cyclomatic-complexity",
@@ -451,6 +452,202 @@ function host(a: boolean) {
         baseline["scoring_version"] += 1
         self.write(BASELINE, json.dumps(baseline))
         self.assertEqual(self.invoke(2)[0]["diagnostics"][0]["kind"], "invalid_baseline")
+
+    def test_baseline_review_proposes_only_safe_reductions(self):
+        source = "def f(x):\n    return 1 if x and x > 2 else 0\n"
+        self.write("debt.py", source)
+        self.config("baseline", {"python": 1}, exclude=["excluded/**"])
+        baseline, _ = self.invoke(0, "baseline")
+        baseline["entries"].append({
+            "rule": "cyclomatic-complexity",
+            "identity": {"path": "excluded/debt.py", "language": "python",
+                         "scope": [{"kind": "function", "name": "hidden"}]},
+            "score": 8,
+        })
+        baseline["entries"].append({
+            "rule": "cyclomatic-complexity",
+            "identity": {"path": "not-selected.ts", "language": "typescript",
+                         "scope": [{"kind": "function", "name": "dormant"}]},
+            "score": 5,
+        })
+        self.write(BASELINE, json.dumps(baseline, indent=2) + "\n")
+        before = (self.root / BASELINE).read_bytes()
+
+        self.write("debt.py", source.replace(" and x > 2", ""))
+        first = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                               capture_output=True, check=False)
+        second = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                capture_output=True, check=False)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(first.stdout, second.stdout)
+        self.assertIn(b"outside policy selection", first.stderr)
+        self.assertIn(b"inactive complexity rule", first.stderr)
+        operations = json.loads(first.stdout)
+        self.assertEqual(operations, [{
+            "op": "replace", "path": "/entries/0/score", "value": 2,
+        }])
+        self.assertEqual((self.root / BASELINE).read_bytes(), before)
+
+        for operation in operations:
+            _, collection, index, *field = operation["path"].split("/")
+            target = baseline[collection]
+            index = int(index)
+            if operation["op"] == "remove":
+                target.pop(index)
+            else:
+                target[index][field[0]] = operation["value"]
+        self.write(BASELINE, json.dumps(baseline, indent=2) + "\n")
+        noop = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                              capture_output=True, check=False)
+        self.assertEqual((noop.returncode, noop.stdout), (0, b"[]\n"))
+        self.assertIn(b"preserved unchanged or worsened callable", noop.stderr)
+
+        self.write("debt.py", "def f(x): return x\n")
+        removal = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                 capture_output=True, check=False)
+        self.assertEqual(removal.returncode, 0, removal.stderr)
+        self.assertEqual(json.loads(removal.stdout), [{"op": "remove", "path": "/entries/0"}])
+
+        self.write("broken.py", "def broken(:\n")
+        incomplete = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                    capture_output=True, check=False)
+        self.assertEqual(incomplete.returncode, 2)
+        self.assertEqual(incomplete.stdout, b"")
+
+    def test_baseline_review_preserves_entries_under_excluded_directories(self):
+        options = {"limits": {"python": 1}, "duplication": {"minimum_tokens": 10}}
+        self.config("baseline", **options)
+        self.write("src/current.ts", "function current() { prepare(item); send(item); }")
+        self.write("vendor/nested/copy.ts", "function copy() { prepare(item); send(item); }")
+        self.write("vendor/nested/debt.py", "def f(x): return 1 if x else 0\n")
+        baseline, raw = self.invoke(0, "baseline")
+        self.assertEqual(len(baseline["entries"]), 1)
+        self.assertEqual(len(baseline["duplication_entries"]), 1)
+        self.write(BASELINE, raw.decode())
+
+        self.config("baseline", exclude=["vendor"], **options)
+        self.assertEqual(self.invoke(0)[0]["files_scanned"], 1)
+        self.assertEqual(self.invoke(0, "baseline-review")[0], [])
+
+    def test_baseline_review_narrows_shorter_duplication(self):
+        self.duplication("baseline", minimum=10)
+        long = "prepare(item); send(item); cleanup(item);"
+        short = "send(item); cleanup(item);"
+        self.write("a.ts", f"function first() {{ {long} }}")
+        self.write("b.ts", f"function second() {{ {long} }}")
+        baseline, _ = self.invoke(0, "baseline")
+        self.write(BASELINE, json.dumps(baseline, indent=2) + "\n")
+
+        self.write("b.ts", f"function second() {{ {short} }}")
+        result = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                capture_output=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        operations = json.loads(result.stdout)
+        self.assertEqual([item["path"].rsplit("/", 1)[-1] for item in operations],
+                         ["score", "tokens"])
+        self.assertEqual(operations[0]["value"], len(operations[1]["value"]))
+        self.assertLess(operations[0]["value"], baseline["duplication_entries"][0]["score"])
+
+    def test_baseline_review_preserves_new_rewritten_worsened_and_ambiguous_duplicates(self):
+        self.duplication("baseline", minimum=10)
+        original = "prepare(item); send(item); cleanup(item);"
+        rewritten = "prepare(other); send(other); cleanup(other);"
+
+        def body(name, statements):
+            return f"function {name}() {{ {statements} }}"
+
+        self.write("a.ts", body("first", original))
+        self.write("b.ts", body("second", original))
+        baseline, _ = self.invoke(0, "baseline")
+        self.write(BASELINE, json.dumps(baseline))
+
+        # A third copy is a new pair and must not change the accepted pair.
+        self.write("c.ts", body("third", original))
+        added_copy = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                    capture_output=True, check=False)
+        self.assertEqual((added_copy.returncode, added_copy.stdout), (0, b"[]\n"))
+        (self.root / "c.ts").unlink()
+
+        # Replacing tokens in both occurrences keeps the allowance outside the patch.
+        self.write("a.ts", body("first", rewritten))
+        self.write("b.ts", body("second", rewritten))
+        replaced = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                  capture_output=True, check=False)
+        self.assertEqual((replaced.returncode, replaced.stdout), (0, b"[]\n"))
+        self.assertIn(b"rewritten duplication match", replaced.stderr)
+
+        # Enlarging the match cannot grant or narrow an allowance.
+        worsened = original + " finish(item);"
+        self.write("a.ts", body("first", worsened))
+        self.write("b.ts", body("second", worsened))
+        enlarged = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                  capture_output=True, check=False)
+        self.assertEqual((enlarged.returncode, enlarged.stdout), (0, b"[]\n"))
+        self.assertIn(b"preserved unchanged, worsened, or rewritten duplication match", enlarged.stderr)
+        report, _ = self.invoke(1)
+        self.assertGreater(report["findings"][0]["score"], baseline["duplication_entries"][0]["score"])
+
+        # Repeated overlapping runs make the callable anchors ambiguous.
+        repeated = original + " " + original
+        self.write("a.ts", body("first", repeated))
+        self.write("b.ts", body("second", repeated))
+        ambiguous = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                   capture_output=True, check=False)
+        self.assertEqual((ambiguous.returncode, ambiguous.stdout), (0, b"[]\n"))
+        self.assertIn(b"deferred", ambiguous.stderr)
+
+    def test_baseline_review_emits_no_patch_on_duplication_resource_error(self):
+        self.duplication("baseline", minimum=20)
+        self.write("a.ts", "function first() { uniqueA(); }")
+        self.write("b.ts", "function second() { uniqueB(); }")
+        baseline, _ = self.invoke(0, "baseline")
+        self.write(BASELINE, json.dumps(baseline))
+        self.write("exhausted.ts", "function repeat() {" + "ping();" * 30000 + "}")
+        result = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                capture_output=True, check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, b"")
+        self.assertIn(b"duplication_limit", result.stderr)
+
+    def test_baseline_review_explains_inactive_duplication_entries(self):
+        self.duplication("baseline", minimum=10)
+        self.write("a.ts", "function first() { prepare(item); send(item); }")
+        self.write("b.ts", "function second() { prepare(item); send(item); }")
+        baseline, _ = self.invoke(0, "baseline")
+        self.write(BASELINE, json.dumps(baseline))
+        self.config("baseline", {"python": 1})
+        self.write("source.py", "def ready(): return True\n")
+        result = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                capture_output=True, check=False)
+        self.assertEqual((result.returncode, result.stdout), (0, b"[]\n"))
+        self.assertIn(b"inactive duplication rule", result.stderr)
+
+    def test_baseline_review_requires_existing_baseline_and_full_scan(self):
+        self.write("source.py", "def f(): return 1\n")
+        missing = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                 capture_output=True, check=False)
+        self.assertEqual(missing.returncode, 2)
+        self.assertEqual(missing.stdout, b"")
+        missing_policy = subprocess.run(
+            [BIN, "baseline-review", "--root", self.root, "--config", self.root / "missing.json"],
+            capture_output=True, check=False,
+        )
+        self.assertEqual(missing_policy.returncode, 2)
+        self.assertEqual(missing_policy.stdout, b"")
+        baseline, _ = self.invoke(0, "baseline")
+        self.write(BASELINE, json.dumps(baseline))
+        baseline["scoring_version"] += 1
+        self.write(BASELINE, json.dumps(baseline))
+        incompatible = subprocess.run([BIN, "baseline-review", "--root", self.root],
+                                     capture_output=True, check=False)
+        self.assertEqual(incompatible.returncode, 2)
+        self.assertEqual(incompatible.stdout, b"")
+        baseline["scoring_version"] -= 1
+        self.write(BASELINE, json.dumps(baseline))
+        partial = subprocess.run([BIN, "baseline-review", "--root", self.root, "--", "source.py"],
+                                 capture_output=True, check=False)
+        self.assertNotEqual(partial.returncode, 0)
+        self.assertEqual(partial.stdout, b"")
 
     def test_unique_returned_callable_can_be_baselined(self):
         self.config("baseline", {"typescript": 1})

@@ -165,13 +165,7 @@ fn scan_file(
     let Some(language) = Language::from_path(path) else {
         return Ok(None);
     };
-    if !policy.selects(language)
-        || !policy.includes(path)
-        || path
-            .ancestors()
-            .skip(1)
-            .any(|parent| !parent.as_os_str().is_empty() && policy.excludes_directory(parent))
-    {
+    if !policy.selects(language) || !policy.includes(path) {
         return Ok(None);
     }
     let error = |kind, message| path_error(kind, path, message);
