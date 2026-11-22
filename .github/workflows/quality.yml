@@ -31,6 +31,7 @@ jobs:
           python3 tests/cli.py
           python3 tests/action_test.py
           python3 tests/publisher_test.py
+          python3 tests/evidence_test.py
           revision=$(python3 tests/action_fixture.py build "$GITHUB_WORKSPACE" "$LINT_GATE_BIN")
           printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
         id: prepare

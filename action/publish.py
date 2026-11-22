@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import re
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from app_report import SAMPLE_LIMIT, STATUSES
@@ -284,7 +284,7 @@ def code(value):
 def finding_identity(finding):
     if finding["rule"] == "source-duplication":
         identities = [
-            {key: occurrence.get(key) for key in ("path", "language", "scope")}
+            {"path": occurrence.get("path"), "range": occurrence.get("range")}
             for occurrence in finding["occurrences"]
         ]
         payload = {"rule": finding["rule"], "occurrences": sorted(identities, key=lambda x: json.dumps(x, sort_keys=True))}
@@ -294,10 +294,12 @@ def finding_identity(finding):
     return hashlib.sha256(encoded).hexdigest(), payload
 
 
-def line_anchor(finding, files):
+def line_anchor(finding, files, compatible_paths=None):
     locations = finding["occurrences"] if finding["rule"] == "source-duplication" else [finding]
     for location in locations:
         path = location.get("path")
+        if compatible_paths is not None and path not in compatible_paths:
+            continue
         start = location.get("range", {}).get("start", {}).get("line")
         if (not isinstance(path, str) or path.startswith("/") or "\\" in path
                 or any(part in ("", ".", "..") for part in path.split("/"))
@@ -325,8 +327,8 @@ def line_anchor(finding, files):
     return None
 
 
-def review_anchor(finding, files):
-    line = line_anchor(finding, files)
+def review_anchor(finding, files, compatible_paths=None):
+    line = line_anchor(finding, files, compatible_paths)
     if line:
         return ("line", *line)
     locations = finding["occurrences"] if finding["rule"] == "source-duplication" else [finding]
@@ -339,9 +341,23 @@ def review_anchor(finding, files):
     return None
 
 
-def owned(comment, app_id):
+def verified_app_actor(api, app_slug):
+    if not app_slug:
+        return None
+    login = f"{app_slug}[bot]"
+    actor = api.json(f"/users/{quote(login, safe='')}")
+    if actor.get("login") != login or actor.get("type") != "Bot" or type(actor.get("id")) is not int:
+        raise ValueError("GitHub did not resolve the configured App bot actor.")
+    return actor["id"]
+
+
+def owned(comment, app_id, app_slug, app_actor_id):
     app = comment.get("performed_via_github_app") or {}
-    return app.get("id") == app_id
+    if app.get("id") == app_id:
+        return True
+    user = comment.get("user") or {}
+    return bool(app_actor_id and user.get("type") == "Bot" and user.get("id") == app_actor_id
+                and user.get("login") == f"{app_slug}[bot]")
 
 
 def thread_data(api, number):
@@ -373,7 +389,7 @@ def set_thread_resolved(api, thread_id, resolved):
     api.graphql(mutation, {"id": thread_id})
 
 
-def reconcile_feedback(api, app_id, number, head, details_url, report, verify_current):
+def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, details_url, report, verify_current, compatible_paths):
     findings = report["findings"]
     blockers = {}
     summary_items = []
@@ -390,7 +406,7 @@ def reconcile_feedback(api, app_id, number, head, details_url, report, verify_cu
     rest_comments = list(api.pages(f"/pulls/{number}/comments", "comments"))
     by_marker = {}
     for comment in rest_comments:
-        if not owned(comment, app_id):
+        if not owned(comment, app_id, app_slug, app_actor_id):
             continue
         match = re.search(r"<!-- lint-gate-finding:([0-9a-f]{64}) -->", comment.get("body", ""))
         if match:
@@ -413,7 +429,7 @@ def reconcile_feedback(api, app_id, number, head, details_url, report, verify_cu
     )
     for identity, finding in blockers.items():
         thread = active_by_identity.get(identity)
-        anchor = review_anchor(finding, files)
+        anchor = review_anchor(finding, files, compatible_paths)
         if thread:
             thread_ids = {node["databaseId"] for node in thread["comments"]["nodes"]}
             existing = next((comment for comment in by_marker[identity]
@@ -428,12 +444,15 @@ def reconcile_feedback(api, app_id, number, head, details_url, report, verify_cu
                         f"{':' + str(anchor[2]) if anchor[0] == 'line' else ''}; score {code(finding['score'])}, "
                         f"limit {code(finding['limit'])}.\n\n[Open the verified scan]({details_url})")
                 if thread["isResolved"]:
+                    verify_current()
                     set_thread_resolved(api, thread["id"], False)
                 if existing.get("body") != body:
+                    verify_current()
                     api.json(f"/pulls/comments/{existing['id']}", "PATCH", {"body": body})
                 continue
             if not anchor:
                 if not thread["isResolved"]:
+                    verify_current()
                     set_thread_resolved(api, thread["id"], True)
                 summary_items.append(("Unanchored blocking error", finding))
                 continue
@@ -441,6 +460,7 @@ def reconcile_feedback(api, app_id, number, head, details_url, report, verify_cu
                 summary_items.append(("Blocking error (thread limit reached)", finding))
                 continue
             if not thread["isResolved"]:
+                verify_current()
                 set_thread_resolved(api, thread["id"], True)
                 active_count -= 1
         elif active_count >= MAX_INLINE_THREADS:
@@ -460,6 +480,7 @@ def reconcile_feedback(api, app_id, number, head, details_url, report, verify_cu
             else:
                 payload["subject_type"] = "file"
             try:
+                verify_current()
                 api.json(f"/pulls/{number}/comments", "POST", payload)
                 active_count += 1
                 continue
@@ -470,10 +491,11 @@ def reconcile_feedback(api, app_id, number, head, details_url, report, verify_cu
 
     for identity, thread in active_by_identity.items():
         if identity not in blockers and not thread["isResolved"]:
+            verify_current()
             set_thread_resolved(api, thread["id"], True)
 
     summary_comments = [comment for comment in api.pages(f"/issues/{number}/comments", "comments")
-                        if owned(comment, app_id) and "<!-- lint-gate-warning-summary -->" in comment.get("body", "")]
+                        if owned(comment, app_id, app_slug, app_actor_id) and "<!-- lint-gate-warning-summary -->" in comment.get("body", "")]
     parts = ["<!-- lint-gate-warning-summary -->", "## Lint Gate findings",
              f"[Open the verified scan]({details_url})"]
     for heading, finding in summary_items[:MAX_SUMMARY_FINDINGS]:
@@ -494,14 +516,16 @@ def reconcile_feedback(api, app_id, number, head, details_url, report, verify_cu
     payload = {"body": "\n\n".join(parts)}
     if summary_comments:
         first = summary_comments[0]
+        verify_current()
         api.json(f"/issues/comments/{first['id']}", "PATCH", payload)
     elif summary_items:
+        verify_current()
         api.json(f"/issues/{number}/comments", "POST", payload)
 
 
 def upsert(api, app_id, run, target, payload):
     prefix = f"{CHECK_KEY}:{run['repository']['id']}:{target}:"
-    order = (run["run_number"], run["run_attempt"])
+    order = (run["run_number"], run["run_attempt"], run["id"])
     query = urlencode({"check_name": CHECK, "app_id": app_id, "filter": "all"})
     matches = []
     for check in api.pages(f"/commits/{target}/check-runs?{query}", "check_runs"):
@@ -511,13 +535,13 @@ def upsert(api, app_id, run, target, payload):
         version = re.fullmatch(r"([0-9]+):([0-9]+):([0-9]+)", external_id.removeprefix(prefix))
         if external_id.startswith(prefix) and version:
             number, attempt, run_id = map(int, version.groups())
-            matches.append(((number, attempt), run_id, check["id"]))
+            matches.append(((number, attempt, run_id), check["id"]))
 
-    version = f"{order[0]}:{order[1]}:{run['id']}"
+    version = f"{order[0]}:{order[1]}:{order[2]}"
     payload = {**payload, "external_id": prefix + version}
     if matches:
-        recorded, recorded_run, check_id = max(matches)
-        if recorded > order or recorded == order and recorded_run == run["id"]:
+        recorded, check_id = max(matches)
+        if recorded >= order:
             return "The advisory check already holds this result or a newer one."
         check = api.json(f"/check-runs/{check_id}", "PATCH", payload)
     else:
@@ -525,6 +549,20 @@ def upsert(api, app_id, run, target, payload):
     if (check["head_sha"], check["app"]["id"], check["name"]) != (target, app_id, CHECK):
         raise ValueError("GitHub returned a check with an unexpected App, name, or commit.")
     return f"Published {CHECK} on PR head {target}."
+
+
+def newest_check_order(api, app_id, run, target):
+    prefix = f"{CHECK_KEY}:{run['repository']['id']}:{target}:"
+    query = urlencode({"check_name": CHECK, "app_id": app_id, "filter": "all"})
+    versions = []
+    for check in api.pages(f"/commits/{target}/check-runs?{query}", "check_runs"):
+        if check["name"] != CHECK or check["head_sha"] != target or check["app"]["id"] != app_id:
+            continue
+        external_id = check.get("external_id") or ""
+        match = re.fullmatch(r"([0-9]+):([0-9]+):([0-9]+)", external_id.removeprefix(prefix))
+        if external_id.startswith(prefix) and match:
+            versions.append(tuple(map(int, match.groups())))
+    return max(versions, default=None)
 
 
 def publish(api, checks, event, workflow_file, source, job_name, repository_id, app_id, repository_url):
@@ -570,7 +608,26 @@ def publish(api, checks, event, workflow_file, source, job_name, repository_id, 
     has_blocking = any(item["status"] == "blocking" for item in report["findings"])
     if has_blocking != (outcome == "blocking"):
         raise Skip("The independent scan disagreed with the native policy gate result.")
-    reconcile_feedback(checks, app_id, number, target, details_url, report, verify_current)
+
+    order = (run["run_number"], run["run_attempt"], run["id"])
+    recorded_order = newest_check_order(checks, app_id, run, target)
+    if recorded_order is not None and recorded_order > order:
+        return "Skipped feedback because a newer or duplicate source run already published."
+
+    manifest_path = os.environ.get("FINDINGS_MANIFEST")
+    compatible_paths = None
+    if manifest_path:
+        manifest = json.loads(Path(manifest_path).read_bytes())
+        if ((manifest.get("revision"), manifest.get("base"), manifest.get("head"),
+             manifest.get("source_run"), manifest.get("source_attempt"), manifest.get("artifact_name")) !=
+                (revision, base, target, str(run["id"]), str(run["run_attempt"]),
+                 os.environ.get("FINDINGS_ARTIFACT_NAME"))):
+            raise Skip("The source coordinate manifest does not match the verified PR target.")
+        compatible_paths = set(manifest.get("compatible_paths", []))
+    app_slug = os.environ.get("APP_SLUG", "")
+    app_actor_id = verified_app_actor(api, app_slug)
+    reconcile_feedback(checks, app_id, app_slug, app_actor_id, number, target, details_url,
+                       report, verify_current, compatible_paths)
 
     counts = {status: sum(item["status"] == status for item in report["findings"])
               for status in STATUSES}
@@ -616,7 +673,7 @@ def main():
     except Skip as error:
         message = f"Skipped App publication. {error}"
     except ApiError as error:
-        raise SystemExit(f"{error} Verify the workflow read permissions and the App installation's Checks, Pull requests, and Issues write permissions.")
+        raise SystemExit(f"{error} Verify the workflow read permissions and the App installation's Checks and Pull requests write permissions.")
     except (URLError, TimeoutError):
         raise SystemExit("GitHub could not be reached. Rerun the publisher to retry.")
     except (KeyError, TypeError, ValueError):

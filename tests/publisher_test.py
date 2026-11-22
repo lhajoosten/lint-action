@@ -88,6 +88,8 @@ class FixtureGitHub:
         self.next_id = 60
         self.attach_error = None
         self.comment_error = None
+        self.update_during_reconcile = False
+        self.pr_reads = 0
 
     def pages(self, path, key):
         if key == "jobs":
@@ -112,10 +114,15 @@ class FixtureGitHub:
 
     def json(self, path, method="GET", payload=None):
         if method == "GET":
+            if path == "/pulls/7":
+                self.pr_reads += 1
+                if self.update_during_reconcile and self.review_comments:
+                    self.pr["merge_commit_sha"] = "e" * 40
             return {
                 f"/actions/workflows/{WORKFLOW}": {"id": 30},
                 f"/actions/runs/{self.run['id']}": self.run,
                 "/pulls/7": self.pr,
+                "/users/lint-gate%5Bbot%5D": {"id": 359848345, "login": "lint-gate[bot]", "type": "Bot"},
                 f"/git/commits/{MERGE}": {"sha": MERGE, "parents": [{"sha": BASE}, {"sha": HEAD}]},
             }[path]
         self.writes.append((method, path))
@@ -134,7 +141,7 @@ class FixtureGitHub:
             if self.comment_error:
                 raise ApiError("review comment", self.comment_error)
             comment = {"id": self.next_id, "body": payload["body"],
-                       "performed_via_github_app": {"id": 42}, **payload}
+                       "user": {"id": 359848345, "login": "lint-gate[bot]", "type": "Bot"}, **payload}
             self.next_id += 1
             self.review_comments.append(comment)
             self.threads.append({"id": f"thread-{comment['id']}", "isResolved": False,
@@ -147,7 +154,7 @@ class FixtureGitHub:
             return comment
         if path == "/issues/7/comments":
             comment = {"id": self.next_id, "body": payload["body"],
-                       "performed_via_github_app": {"id": 42}}
+                       "user": {"id": 359848345, "login": "lint-gate[bot]", "type": "Bot"}}
             self.next_id += 1
             self.issue_comments.append(comment)
             return comment
@@ -164,7 +171,7 @@ class FixtureGitHub:
                 "nodes": deepcopy(self.threads), "pageInfo": {"hasNextPage": False, "endCursor": None},
             }}}}
         thread = next(item for item in self.threads if item["id"] == variables["id"])
-        thread["isResolved"] = "resolveReviewThread" in query
+        thread["isResolved"] = "{ resolveReviewThread(" in query
         self.writes.append(("GRAPHQL", "resolve" if thread["isResolved"] else "unresolve"))
         return {"resolveReviewThread" if thread["isResolved"] else "unresolveReviewThread": {
             "thread": {"id": thread["id"], "isResolved": thread["isResolved"]},
@@ -184,10 +191,11 @@ class FixtureGitHub:
             path.write_text(json.dumps(self.report), encoding="utf-8")
             env = {
                 "GITHUB_REPOSITORY": "owner/repo",
+                "APP_SLUG": "lint-gate",
                 "FINDINGS_REPORT": str(path), "PULL_REQUEST": "7", "VERIFIED_REVISION": MERGE,
                 "VERIFIED_BASE": BASE, "VERIFIED_HEAD": HEAD, "SOURCE_RUN": str(self.run["id"]),
                 "SOURCE_ATTEMPT": str(self.run["run_attempt"]),
-                "DETAILS_URL": f"{REPOSITORY_URL}/actions/runs/100/attempts/{self.run['run_attempt']}",
+                "DETAILS_URL": f"{REPOSITORY_URL}/actions/runs/{self.run['id']}/attempts/{self.run['run_attempt']}",
                 "SCAN_COMPLETE": "true",
                 "SOURCE_OUTCOME": source_outcome,
                 "VERIFIED_SCANNER_REPOSITORY": "owner/tool", "VERIFIED_SCANNER_SHA": SCANNER_SHA,
@@ -347,6 +355,54 @@ class PublisherTests(unittest.TestCase):
         self.api.receive()
         self.assertFalse(self.api.threads[0]["isResolved"])
         self.assertFalse(any(method == "GRAPHQL" for method, _ in self.api.writes))
+
+    def test_rest_api_bot_actor_shape_is_owned_without_performed_app_field(self):
+        self.api.report = report([finding()])
+        self.api.steps["Scan source"] = "failure"
+        self.api.steps["Record policy violations"] = "success"
+        self.api.receive()
+        self.api.report = report()
+        self.api.run["run_attempt"] = 2
+        self.api.steps["Scan source"] = "success"
+        self.api.steps.pop("Record policy violations")
+        self.api.receive()
+        self.assertTrue(self.api.threads[0]["isResolved"])
+
+    def test_older_distinct_run_cannot_overwrite_newer_same_revision_feedback(self):
+        self.api.report = report([finding("reported")])
+        self.api.receive()
+        writes_after_newer = list(self.api.writes)
+        self.api.run.update(id=99, run_number=3)
+        self.api.receive()
+        self.assertEqual(self.api.writes, writes_after_newer)
+        self.assertEqual(len(self.api.issue_comments), 1)
+
+    def test_pr_update_during_reconciliation_stops_later_writes(self):
+        self.api.report = report([finding(), finding(path="other.ts")])
+        self.api.steps["Scan source"] = "failure"
+        self.api.steps["Record policy violations"] = "success"
+        self.api.update_during_reconcile = True
+        with self.assertRaisesRegex(Skip, "synthetic merge"):
+            self.api.receive()
+        self.assertEqual(len(self.api.review_comments), 1)
+        self.assertFalse(any(path.startswith("/issues/") or path.startswith("/check-runs")
+                             for _, path in self.api.writes))
+
+    def test_duplicate_findings_with_same_paths_but_distinct_ranges_survive(self):
+        first = {"path": "new.ts", "language": "typescript", "scope": [],
+                 "range": {"start": {"line": 1, "column": 1}}}
+        second = {"path": "new.ts", "language": "typescript", "scope": [],
+                  "range": {"start": {"line": 8, "column": 1}}}
+        duplicates = [{"rule": "source-duplication", "severity": "error", "status": "blocking",
+                       "score": 20, "limit": 10, "occurrences": pair}
+                      for pair in ([first, {**first, "path": "lib.ts"}],
+                                   [second, {**second, "path": "lib.ts"}])]
+        self.api.report = report(duplicates)
+        self.api.steps["Scan source"] = "failure"
+        self.api.steps["Record policy violations"] = "success"
+        self.api.receive()
+        self.assertEqual(len(self.api.review_comments), 2)
+        self.assertNotEqual(self.api.review_comments[0]["body"], self.api.review_comments[1]["body"])
 
     def test_permission_failure_is_reported(self):
         self.api.report = report([finding("reported")])

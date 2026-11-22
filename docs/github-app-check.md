@@ -4,10 +4,10 @@ The optional publisher adds **Lint Gate (advisory)** under your App's identity. 
 
 ## Set up the App
 
-1. Create a GitHub App with repository **Checks: Read and write**, **Pull requests: Read and write**, and **Issues: Read and write**. These permissions let the publisher maintain review threads and a Conversation summary. An incoming webhook is unnecessary. Install the App on the repository that receives the pull requests.
+1. Create a GitHub App with repository **Checks: Read and write**. The existing advisory check needs only Checks write. To opt into PR conversations, also grant **Pull requests: Read and write**; GitHub accepts that permission for PR Conversation comments and review threads. An incoming webhook is unnecessary. Install the App on the repository that receives the pull requests.
 2. Set the repository Actions variable `LINT_GATE_APP_ID` to the numeric App ID and the Actions secret `LINT_GATE_APP_PRIVATE_KEY` to the App's PEM private key.
-3. Pin the read-only scan caller to a reviewed full commit SHA and set `publish-report: true`. The publisher verifies the candidate marker recorded by this option, then runs its own scan; it does not treat the uploaded report artifact as authoritative.
-4. Add the publisher caller below to the default branch and set `LINT_GATE_APP_PUBLISH` to `true`. The publisher uses the private key to mint a short-lived token for the current repository with Checks, Pull requests, and Issues write. The scan needs only read permissions and runs on fork PRs without App credentials.
+3. Pin the read-only scan caller to a reviewed full commit SHA and set `publish-report: true` to preserve the existing advisory check input. When conversation publishing is enabled, a separate trusted job independently rescans the verified merge tree; only that fresh scan evidence can drive review-thread or Conversation writes.
+4. Add the publisher caller below to the default branch and set `LINT_GATE_APP_PUBLISH` to `true`. This preserves advisory-only publication. Set `LINT_GATE_APP_CONVERSATIONS` to `true` to opt into the independent trusted rescan and PR conversations; that mode mints a short-lived token with Checks and Pull requests write. The scan needs only read permissions and runs on fork PRs without App credentials.
 
 In the example, the scan caller is named **Source complexity** and lives at `.github/workflows/source-complexity.yml`. Its job ID is `complexity`, which results in the analysis job display name `complexity / complexity`. Use the actual workflow name, filename, and job display name if yours differ. Replace both commit SHA placeholders with the reviewed revisions, and use the same scanner SHA in the scan caller and publisher input.
 
@@ -29,6 +29,7 @@ jobs:
     uses: lhajoosten/lint-gate/.github/workflows/publish-app-check.yml@<publisher-sha>
     with:
       enabled: ${{ vars.LINT_GATE_APP_PUBLISH == 'true' }}
+      publish-conversations: ${{ vars.LINT_GATE_APP_CONVERSATIONS == 'true' }}
       app-id: ${{ vars.LINT_GATE_APP_ID }}
       source-workflow: source-complexity.yml
       scanner-workflow: lhajoosten/lint-gate/.github/workflows/source-complexity.yml@<scanner-sha>
@@ -37,13 +38,13 @@ jobs:
       app-private-key: ${{ secrets.LINT_GATE_APP_PRIVATE_KEY }}
 ```
 
-Set `LINT_GATE_APP_PUBLISH` to `false` or remove it to pause publication. Turn off `publish-report` to pause report uploads as well. GitHub retains these small report artifacts for seven days.
+Set `LINT_GATE_APP_PUBLISH` to `false` or remove it to pause publication. Leave `LINT_GATE_APP_CONVERSATIONS` unset to keep the existing Checks-only advisory behavior. The pilot scanner is pinned to the reviewed #34 severity policy revision in both caller workflows; update both pins together when upgrading. For the pilot, require the native `complexity / complexity` analysis job in branch protection or a ruleset. The publisher does not alter repository protection settings.
 
 ## Revision and failure behavior
 
 The scan uses GitHub's synthetic merge tree with policy from the event's base commit. The publisher verifies the source workflow and attempt, the job's recorded candidate, and the current PR's synthetic merge and its parents before creating a check on the PR head. It skips publication if a push, rebase, or base update makes the candidate impossible to associate. The Checks API can also decline to attach a check for a fork PR. Use the native Actions run for feedback in either case.
 
-The reusable publisher first verifies the completed source workflow, attempt, scanner revision, current PR head, base, and synthetic merge commit. A separate job then checks out that merge tree and runs the scanner from the exact verified scanner revision with policy from the trusted base commit. Candidate files are only read as scanner input; no candidate code is run. That read-only job uploads its scan result to the writer job in the same workflow run. The App writer does not check out candidate source. It validates the current PR association again before writing feedback. The source run's artifact is not used as evidence for conversations.
+The conversation publisher first verifies the completed source workflow, attempt, scanner revision, current PR head, base, and synthetic merge commit. A separate job then checks out that merge tree and runs the scanner from the exact verified scanner revision with policy from the trusted base commit. Candidate files are only read as scanner input; no candidate code is run. That read-only job uploads its scan result and source coordinate manifest to the writer job in the same workflow run. The App writer does not check out candidate source. It validates the current PR association before each write. The source run's artifact is not used as evidence for conversations.
 
 Blocking findings with a current diff line become App-owned line threads. Findings in changed files without a usable line anchor use file-level threads when GitHub accepts them. Other errors, and all reported warnings, appear in one maintained top-level Conversation comment. Baselined findings do not create required conversations. A complete verified rescan resolves only this App's obsolete finding threads; incomplete analysis and uncertain association leave existing feedback untouched. Review comments include a link to the verified scan attempt.
 
