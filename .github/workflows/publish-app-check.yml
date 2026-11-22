@@ -111,7 +111,6 @@ jobs:
       scanner_sha: ${{ steps.verify.outputs.scanner_sha }}
       details_url: ${{ steps.verify.outputs.details_url }}
       scan_complete: ${{ steps.ready.outputs.complete }}
-      artifact_id: ${{ steps.upload.outputs.artifact-id }}
       artifact_name: ${{ steps.stage.outputs.artifact_name }}
       source_outcome: ${{ steps.verify.outputs.source_outcome }}
     steps:
@@ -184,7 +183,6 @@ jobs:
           SCAN_REPORT: ${{ steps.rescan.outputs.report }}
         run: '"$RUNNER_TEMP/lint-gate-publisher-build/release/lint-gate" github-stage-evidence'
       - name: Upload trusted scan evidence
-        id: upload
         if: >-
           steps.rescan.outputs.outcome == '0' || steps.rescan.outputs.outcome == '1'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -227,7 +225,7 @@ jobs:
         if: needs.scan.outputs.scan_complete == 'true'
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.3.0
         with:
-          artifact-ids: ${{ needs.scan.outputs.artifact_id }}
+          name: ${{ needs.scan.outputs.artifact_name }}
           path: ${{ runner.temp }}/lint-gate-findings
       - name: Build the trusted publisher
         run: |
