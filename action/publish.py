@@ -1,4 +1,4 @@
-"""Publish an advisory check from a completed pull_request workflow."""
+"""Publish PR conversations from an independently verified pull_request scan."""
 
 import hashlib
 import json
@@ -6,13 +6,9 @@ import os
 from pathlib import Path
 import re
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from app_report import SAMPLE_LIMIT, STATUSES
-
-CHECK = "Lint Gate (advisory)"
-CHECK_KEY = "lint-gate-advisory-v1"
 SHA = r"[0-9a-f]{40}"
 REPO = r"[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+"
 CANDIDATE = rf"Record candidate ([1-9][0-9]*) ({SHA}) ({SHA})"
@@ -21,7 +17,7 @@ MAX_SUMMARY_FINDINGS = 50
 
 
 class Skip(Exception):
-    """No safely attributable check can be published."""
+    """No safely attributable conversation can be published."""
 
 
 class ApiError(Exception):
@@ -41,9 +37,9 @@ class GitHub:
         self.root = f"{base_url}/repos/{repository}"
         self.token = token
 
-    def request(self, path, method="GET", payload=None):
+    def request(self, path, method="GET", payload=None, api_root=False):
         request = Request(
-            self.root + path,
+            (self.base_url if api_root else self.root) + path,
             data=json.dumps(payload).encode() if payload is not None else None,
             headers={
                 "Authorization": f"Bearer {self.token}",
@@ -58,6 +54,16 @@ class GitHub:
     def json(self, path, method="GET", payload=None):
         try:
             with self.request(path, method, payload) as response:
+                data = response.read(4 * 1024**2 + 1)
+            if len(data) > 4 * 1024**2:
+                raise ValueError("GitHub API response exceeded its size limit.")
+            return json.loads(data)
+        except HTTPError as error:
+            raise ApiError(f"{method} {path}", error.code) from None
+
+    def json_api(self, path, method="GET", payload=None):
+        try:
+            with self.request(path, method, payload, api_root=True) as response:
                 data = response.read(4 * 1024**2 + 1)
             if len(data) > 4 * 1024**2:
                 raise ValueError("GitHub API response exceeded its size limit.")
@@ -212,34 +218,6 @@ def scan_outcome(steps):
     return "incomplete"
 
 
-def check_output(outcome, report, revision, target, details_url):
-    title, conclusion = {
-        "bootstrap": ("Policy bootstrap", "skipped"),
-        "passed": ("Clean", "success"),
-        "blocking": ("Blocking policy findings", "neutral"),
-        "incomplete": ("Analysis incomplete", "neutral"),
-    }[outcome]
-    summary = [f"[Open the analysis run]({details_url})",
-               f"PR head `{target}` · GitHub synthetic merge tree `{revision}`"]
-    if outcome == "bootstrap":
-        summary.append("The PR base has no Lint Gate policy yet. The scan was skipped for bootstrap.")
-    if report:
-        counts = report["counts"]
-        if outcome == "passed" and (counts["reported"] or counts["baselined"]):
-            title, conclusion = "Warnings", "neutral"
-        summary.append(
-            f'Files scanned {report["files"]} · Analysis errors {report["errors"]} · '
-            f'Reported {counts["reported"]} · Baselined {counts["baselined"]} · Blocking {counts["blocking"]}'
-        )
-        if report["samples"]:
-            samples = [json.dumps(sample).replace("`", r"\u0060") for sample in report["samples"]]
-            summary.append("```text\n" + "\n".join(samples) + "\n```")
-    return {
-        "name": CHECK, "status": "completed", "conclusion": conclusion, "details_url": details_url,
-        "output": {"title": title, "summary": "\n\n".join(summary)},
-    }
-
-
 def validate_scan_report(path):
     if Path(path).stat().st_size > 16 * 1024 * 1024:
         raise ValueError("Trusted scan report exceeded its size limit.")
@@ -345,7 +323,7 @@ def verified_app_actor(api, app_slug):
     if not app_slug:
         return None
     login = f"{app_slug}[bot]"
-    actor = api.json(f"/users/{quote(login, safe='')}")
+    actor = api.json_api(f"/users/{quote(login, safe='')}")
     if actor.get("login") != login or actor.get("type") != "Bot" or type(actor.get("id")) is not int:
         raise ValueError("GitHub did not resolve the configured App bot actor.")
     return actor["id"]
@@ -389,7 +367,15 @@ def set_thread_resolved(api, thread_id, resolved):
     api.graphql(mutation, {"id": thread_id})
 
 
-def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, details_url, report, verify_current, compatible_paths):
+FEEDBACK_ORDER = re.compile(r"<!-- lint-gate-feedback:v1:([0-9]+):([0-9]+):([0-9]+) -->")
+
+
+def feedback_order_marker(order):
+    return f"<!-- lint-gate-feedback:v1:{order[0]}:{order[1]}:{order[2]} -->"
+
+
+def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, details_url,
+                       report, verify_current, compatible_paths, order):
     findings = report["findings"]
     blockers = {}
     summary_items = []
@@ -404,10 +390,31 @@ def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, detail
             blockers[identity] = finding
 
     rest_comments = list(api.pages(f"/pulls/{number}/comments", "comments"))
+    issue_comments = list(api.pages(f"/issues/{number}/comments", "comments"))
+    owned_rest = [comment for comment in rest_comments if owned(comment, app_id, app_slug, app_actor_id)]
+    owned_issue = [comment for comment in issue_comments if owned(comment, app_id, app_slug, app_actor_id)]
+    recorded_orders = [tuple(map(int, match.groups()))
+                       for comment in owned_rest + owned_issue
+                       for match in [FEEDBACK_ORDER.search(comment.get("body", ""))] if match]
+    if recorded_orders and max(recorded_orders) > order:
+        raise Skip("A newer verified scan already published PR feedback.")
+    summary_comments = [comment for comment in owned_issue
+                        if "<!-- lint-gate-warning-summary -->" in comment.get("body", "")]
+    verify_current()
+    order_marker = feedback_order_marker(order)
+    if summary_comments:
+        first = summary_comments[0]
+        reserved_body = FEEDBACK_ORDER.sub("", first.get("body", "")).strip()
+        reserved_body = f"{order_marker}\n{reserved_body}"
+        if first.get("body") != reserved_body:
+            first.update(api.json(f"/issues/comments/{first['id']}", "PATCH", {"body": reserved_body}))
+    else:
+        reserved = api.json(f"/issues/{number}/comments", "POST", {
+            "body": f"{order_marker}\n<!-- lint-gate-warning-summary -->",
+        })
+        summary_comments = [reserved]
     by_marker = {}
-    for comment in rest_comments:
-        if not owned(comment, app_id, app_slug, app_actor_id):
-            continue
+    for comment in owned_rest:
         match = re.search(r"<!-- lint-gate-finding:([0-9a-f]{64}) -->", comment.get("body", ""))
         if match:
             by_marker.setdefault(match.group(1), []).append(comment)
@@ -438,7 +445,7 @@ def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, detail
                                if existing and existing.get("line") else
                                ("file", existing.get("path")) if existing else None)
             if anchor and existing and existing_anchor == anchor:
-                body = (f"<!-- lint-gate-finding:{identity} -->\n**Lint Gate blocking finding**\n\n"
+                body = (f"{order_marker}\n<!-- lint-gate-finding:{identity} -->\n**Lint Gate blocking finding**\n\n"
                     f"Rule {code(finding['rule'])} {code(finding.get('name', ''))} "
                     f"({code(finding.get('severity', 'error'))}) at {code(anchor[1])}"
                         f"{':' + str(anchor[2]) if anchor[0] == 'line' else ''}; score {code(finding['score'])}, "
@@ -468,7 +475,7 @@ def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, detail
             continue
         if anchor:
             path = anchor[1]
-            body = (f"<!-- lint-gate-finding:{identity} -->\n**Lint Gate blocking finding**\n\n"
+            body = (f"{order_marker}\n<!-- lint-gate-finding:{identity} -->\n**Lint Gate blocking finding**\n\n"
                     f"Rule {code(finding['rule'])} {code(finding.get('name', ''))} "
                     f"({code(finding.get('severity', 'error'))}) at {code(path)}"
                     f"{':' + str(anchor[2]) if anchor[0] == 'line' else ''}; score "
@@ -494,9 +501,7 @@ def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, detail
             verify_current()
             set_thread_resolved(api, thread["id"], True)
 
-    summary_comments = [comment for comment in api.pages(f"/issues/{number}/comments", "comments")
-                        if owned(comment, app_id, app_slug, app_actor_id) and "<!-- lint-gate-warning-summary -->" in comment.get("body", "")]
-    parts = ["<!-- lint-gate-warning-summary -->", "## Lint Gate findings",
+    parts = [order_marker, "<!-- lint-gate-warning-summary -->", "## Lint Gate findings",
              f"[Open the verified scan]({details_url})"]
     for heading, finding in summary_items[:MAX_SUMMARY_FINDINGS]:
         location = finding.get("path")
@@ -510,62 +515,18 @@ def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, detail
     if len(summary_items) > MAX_SUMMARY_FINDINGS:
         parts.append(f"\nShowing {MAX_SUMMARY_FINDINGS} of {len(summary_items)} findings; use the scan link for the full report.")
     if not summary_items:
-        if not summary_comments:
-            return
         parts.append("No reported warnings or unanchored blocking findings remain.")
     payload = {"body": "\n\n".join(parts)}
     if summary_comments:
         first = summary_comments[0]
         verify_current()
         api.json(f"/issues/comments/{first['id']}", "PATCH", payload)
-    elif summary_items:
+    else:
         verify_current()
         api.json(f"/issues/{number}/comments", "POST", payload)
 
 
-def upsert(api, app_id, run, target, payload):
-    prefix = f"{CHECK_KEY}:{run['repository']['id']}:{target}:"
-    order = (run["run_number"], run["run_attempt"], run["id"])
-    query = urlencode({"check_name": CHECK, "app_id": app_id, "filter": "all"})
-    matches = []
-    for check in api.pages(f"/commits/{target}/check-runs?{query}", "check_runs"):
-        if check["name"] != CHECK or check["head_sha"] != target or check["app"]["id"] != app_id:
-            continue
-        external_id = check.get("external_id") or ""
-        version = re.fullmatch(r"([0-9]+):([0-9]+):([0-9]+)", external_id.removeprefix(prefix))
-        if external_id.startswith(prefix) and version:
-            number, attempt, run_id = map(int, version.groups())
-            matches.append(((number, attempt, run_id), check["id"]))
-
-    version = f"{order[0]}:{order[1]}:{order[2]}"
-    payload = {**payload, "external_id": prefix + version}
-    if matches:
-        recorded, check_id = max(matches)
-        if recorded >= order:
-            return "The advisory check already holds this result or a newer one."
-        check = api.json(f"/check-runs/{check_id}", "PATCH", payload)
-    else:
-        check = api.json("/check-runs", "POST", {**payload, "head_sha": target})
-    if (check["head_sha"], check["app"]["id"], check["name"]) != (target, app_id, CHECK):
-        raise ValueError("GitHub returned a check with an unexpected App, name, or commit.")
-    return f"Published {CHECK} on PR head {target}."
-
-
-def newest_check_order(api, app_id, run, target):
-    prefix = f"{CHECK_KEY}:{run['repository']['id']}:{target}:"
-    query = urlencode({"check_name": CHECK, "app_id": app_id, "filter": "all"})
-    versions = []
-    for check in api.pages(f"/commits/{target}/check-runs?{query}", "check_runs"):
-        if check["name"] != CHECK or check["head_sha"] != target or check["app"]["id"] != app_id:
-            continue
-        external_id = check.get("external_id") or ""
-        match = re.fullmatch(r"([0-9]+):([0-9]+):([0-9]+)", external_id.removeprefix(prefix))
-        if external_id.startswith(prefix) and match:
-            versions.append(tuple(map(int, match.groups())))
-    return max(versions, default=None)
-
-
-def publish(api, checks, event, workflow_file, source, job_name, repository_id, app_id, repository_url):
+def publish(api, writes, event, workflow_file, source, job_name, repository_id, app_id, repository_url):
     run, number, revision, base, target, scanner_repository, scanner_sha, steps = verified_scan_target(
         api, event, workflow_file, source, job_name, repository_id,
     )
@@ -596,23 +557,18 @@ def publish(api, checks, event, workflow_file, source, job_name, repository_id, 
 
     if outcome in ("bootstrap", "incomplete"):
         verify_current()
-        payload = check_output(outcome, None, revision, target, details_url)
-        return upsert(checks, app_id, run, target, payload)
+        return "No complete verified scan is available for PR conversations."
     if outcome not in ("passed", "blocking"):
         raise Skip("The source run has no publishable analysis outcome.")
     if os.environ.get("SCAN_COMPLETE") != "true":
         verify_current()
-        payload = check_output("incomplete", None, revision, target, details_url)
-        return upsert(checks, app_id, run, target, payload)
+        return "No complete verified scan is available for PR conversations."
     report = validate_scan_report(os.environ["FINDINGS_REPORT"])
     has_blocking = any(item["status"] == "blocking" for item in report["findings"])
     if has_blocking != (outcome == "blocking"):
         raise Skip("The independent scan disagreed with the native policy gate result.")
 
     order = (run["run_number"], run["run_attempt"], run["id"])
-    recorded_order = newest_check_order(checks, app_id, run, target)
-    if recorded_order is not None and recorded_order > order:
-        return "Skipped feedback because a newer or duplicate source run already published."
 
     manifest_path = os.environ.get("FINDINGS_MANIFEST")
     compatible_paths = None
@@ -626,31 +582,9 @@ def publish(api, checks, event, workflow_file, source, job_name, repository_id, 
         compatible_paths = set(manifest.get("compatible_paths", []))
     app_slug = os.environ.get("APP_SLUG", "")
     app_actor_id = verified_app_actor(api, app_slug)
-    reconcile_feedback(checks, app_id, app_slug, app_actor_id, number, target, details_url,
-                       report, verify_current, compatible_paths)
-
-    counts = {status: sum(item["status"] == status for item in report["findings"])
-              for status in STATUSES}
-    samples = []
-    for finding in report["findings"]:
-        if finding["status"] == "baselined":
-            continue
-        finding_id, _ = finding_identity(finding)
-        path = finding.get("path") or ", ".join(item.get("path", "") for item in finding.get("occurrences", []))
-        samples.append(f"{finding['rule']}: {path} score {finding['score']} limit {finding['limit']} [{finding_id[:12]}]")
-    summary_report = {
-        "counts": counts, "files": report["files_scanned"], "errors": 0,
-        "samples": samples[:SAMPLE_LIMIT],
-    }
-    payload = check_output(outcome, summary_report, revision, target, details_url)
-    try:
-        verify_current()
-        return upsert(checks, app_id, run, target, payload)
-    except ApiError as error:
-        if error.status in (404, 422):
-            raise Skip(f"GitHub could not attach the check to this PR head. {error} "
-                       "Verify the installation has Checks write for this repository.") from None
-        raise
+    reconcile_feedback(writes, app_id, app_slug, app_actor_id, number, target, details_url,
+                       report, verify_current, compatible_paths, order)
+    return "Published PR conversations from the verified scan."
 
 
 def main():
@@ -663,17 +597,17 @@ def main():
     ):
         raise SystemExit("Invalid analysis workflow configuration. Check the publisher inputs.")
     api = GitHub(env["GITHUB_API_URL"], repository, env["GITHUB_TOKEN"])
-    checks = GitHub(env["GITHUB_API_URL"], repository, env["APP_TOKEN"])
+    writes = GitHub(env["GITHUB_API_URL"], repository, env["APP_TOKEN"])
     try:
         message = publish(
-            api, checks, json.loads(Path(env["GITHUB_EVENT_PATH"]).read_bytes()),
+            api, writes, json.loads(Path(env["GITHUB_EVENT_PATH"]).read_bytes()),
             workflow, source, env["ANALYSIS_JOB"], int(env["GITHUB_REPOSITORY_ID"]),
             int(env["APP_ID"]), f"{env['GITHUB_SERVER_URL']}/{repository}",
         )
     except Skip as error:
         message = f"Skipped App publication. {error}"
     except ApiError as error:
-        raise SystemExit(f"{error} Verify the workflow read permissions and the App installation's Checks and Pull requests write permissions.")
+        raise SystemExit(f"{error} Verify the workflow read permissions and the App installation's Pull requests write permission.")
     except (URLError, TimeoutError):
         raise SystemExit("GitHub could not be reached. Rerun the publisher to retry.")
     except (KeyError, TypeError, ValueError):

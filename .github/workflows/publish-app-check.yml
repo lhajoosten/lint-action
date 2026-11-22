@@ -39,7 +39,7 @@ permissions:
 jobs:
   advisory:
     if: >-
-      inputs.enabled && !inputs.publish-conversations && github.event_name == 'workflow_run' &&
+      inputs.enabled && github.event_name == 'workflow_run' &&
       github.event.action == 'completed' && github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -191,7 +191,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-      pull-requests: write
+      pull-requests: read
     concurrency:
       group: lint-gate-pr-feedback-${{ needs.scan.outputs.pull_request }}
       queue: max
@@ -223,12 +223,11 @@ jobs:
         with:
           app-id: ${{ inputs.app-id }}
           private-key: ${{ secrets.app-private-key }}
-          permission-checks: write
           permission-pull-requests: write
       - name: Explain installation failures
         if: failure() && steps.installation.outcome == 'failure'
-        run: echo '::error::Verify the App ID and private key match and the App is installed with Checks and Pull requests write permissions.'
-      - name: Publish PR conversations and the advisory check
+        run: echo '::error::Verify the App ID and private key match and the App is installed with Pull requests write permission.'
+      - name: Publish PR conversations
         env:
           GITHUB_TOKEN: ${{ github.token }}
           APP_TOKEN: ${{ steps.installation.outputs.token }}

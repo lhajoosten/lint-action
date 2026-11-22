@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 import unittest
@@ -12,7 +13,7 @@ from unittest.mock import patch
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT / "action"))
 
-from publish import ApiError, CHECK, Skip, line_anchor, publish, review_anchor
+from publish import ApiError, GitHub, Skip, line_anchor, publish, review_anchor, verified_app_actor
 
 HEAD = "a" * 40
 BASE = "b" * 40
@@ -47,8 +48,7 @@ def verify_candidate_reports(passing, failing):
     pass_api = FixtureGitHub()
     pass_api.report = passing_report
     pass_api.receive()
-    assert not pass_api.review_comments and not pass_api.issue_comments
-    assert pass_api.checks[0]["conclusion"] == "neutral"
+    assert not pass_api.review_comments
 
     fail_api = FixtureGitHub()
     fail_api.report = failing_report
@@ -57,8 +57,7 @@ def verify_candidate_reports(passing, failing):
     fail_api.receive()
     assert not fail_api.review_comments
     assert "Unanchored blocking error" in fail_api.issue_comments[0]["body"]
-    assert "Baselined" in fail_api.checks[0]["output"]["summary"]
-    assert fail_api.checks[0]["conclusion"] == "neutral"
+    assert "Unanchored blocking error" in fail_api.issue_comments[0]["body"]
 
 
 class FixtureGitHub:
@@ -80,13 +79,11 @@ class FixtureGitHub:
         }
         self.steps = {f"Record candidate 7 {MERGE} {BASE}": "success", "Scan source": "success"}
         self.report = report()
-        self.checks = []
         self.review_comments = []
         self.issue_comments = []
         self.threads = []
         self.writes = []
         self.next_id = 60
-        self.attach_error = None
         self.comment_error = None
         self.update_during_reconcile = False
         self.pr_reads = 0
@@ -98,9 +95,6 @@ class FixtureGitHub:
                 "name": JOB, "run_id": self.run["id"], "run_attempt": self.run["run_attempt"],
                 "steps": [{"name": name, "conclusion": value} for name, value in self.steps.items()],
             }]
-        if key == "check_runs":
-            assert path.startswith(f"/commits/{HEAD}/check-runs?")
-            return self.checks
         if key == "files":
             assert path.startswith("/pulls/7/files")
             return [{"filename": "new.ts", "status": "added",
@@ -126,17 +120,6 @@ class FixtureGitHub:
                 f"/git/commits/{MERGE}": {"sha": MERGE, "parents": [{"sha": BASE}, {"sha": HEAD}]},
             }[path]
         self.writes.append((method, path))
-        if path.startswith("/check-runs"):
-            if self.attach_error:
-                raise ApiError("check write", self.attach_error)
-            check = {"id": 60, "head_sha": HEAD, "app": {"id": 42}, **payload}
-            if method == "POST":
-                assert path == "/check-runs" and payload["head_sha"] == HEAD
-                self.checks.append(check)
-            else:
-                assert path == "/check-runs/60" and "head_sha" not in payload
-                self.checks[0] = check
-            return check
         if path == "/pulls/7/comments":
             if self.comment_error:
                 raise ApiError("review comment", self.comment_error)
@@ -177,6 +160,10 @@ class FixtureGitHub:
             "thread": {"id": thread["id"], "isResolved": thread["isResolved"]},
         }}
 
+    def json_api(self, path, method="GET", payload=None):
+        assert path == "/users/lint-gate%5Bbot%5D" and method == "GET"
+        return {"id": 359848345, "login": "lint-gate[bot]", "type": "Bot"}
+
     def receive(self, incoming=None):
         event = {"repository": {"id": 10}, "workflow_run": incoming or deepcopy(self.run)}
         source_outcome = (
@@ -216,7 +203,6 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(len(self.api.issue_comments), 1)
         self.assertIn("Warning", self.api.issue_comments[0]["body"])
         self.assertEqual(len(self.api.review_comments), 0)
-        self.assertEqual([method for method, path in self.api.writes if path == "/check-runs"], ["POST"])
         self.assertIn(("PATCH", f"/issues/comments/{self.api.issue_comments[0]['id']}"), self.api.writes)
 
     def test_blocking_finding_creates_resolvable_thread_and_fix_resolves_it(self):
@@ -299,7 +285,8 @@ class PublisherTests(unittest.TestCase):
         self.api.report = report([finding("baselined")])
         self.api.receive()
         self.assertEqual(self.api.review_comments, [])
-        self.assertEqual(self.api.issue_comments, [])
+        self.assertNotIn("Warning", self.api.issue_comments[0]["body"])
+        self.assertNotIn("Blocking", self.api.issue_comments[0]["body"])
 
     def test_pre_severity_report_format_remains_supported(self):
         old = finding("reported")
@@ -322,7 +309,6 @@ class PublisherTests(unittest.TestCase):
         self.api.report = report([], [{"kind": "parse_error", "message": "invalid"}])
         self.api.steps["Scan source"] = "failure"
         self.api.receive()
-        self.assertEqual(self.api.checks[0]["output"]["title"], "Analysis incomplete")
         self.assertFalse(any(path.startswith("/pulls/7/comments") or path.startswith("/issues/7/comments")
                              or method == "GRAPHQL" for method, path in self.api.writes))
 
@@ -368,12 +354,55 @@ class PublisherTests(unittest.TestCase):
         self.api.receive()
         self.assertTrue(self.api.threads[0]["isResolved"])
 
+    def test_app_bot_lookup_uses_api_root_url(self):
+        class Response:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return False
+            def read(self, _limit):
+                return b'{"id":359848345,"login":"lint-gate[bot]","type":"Bot"}'
+
+        requested = []
+        def open_request(request, timeout):
+            requested.append(request.full_url)
+            return Response()
+
+        api = GitHub("https://api.github.com", "owner/repo", "token")
+        with patch("publish.build_opener") as opener:
+            opener.return_value.open.side_effect = open_request
+            self.assertEqual(verified_app_actor(api, "lint-gate"), 359848345)
+        self.assertEqual(requested, ["https://api.github.com/users/lint-gate%5Bbot%5D"])
+
+    def test_reusable_workflow_token_permissions_do_not_exceed_callers(self):
+        reusable = (PROJECT / ".github/workflows/publish-app-check.yml").read_text(encoding="utf-8")
+        caller = (PROJECT / ".github/workflows/own-app-check.yml").read_text(encoding="utf-8")
+        publisher = (PROJECT / "action/publish.py").read_text(encoding="utf-8")
+        jobs = re.findall(r"(?ms)^  (?:advisory|scan|publish):\n(.*?)(?=^  [a-z][a-z0-9_-]*:\n|\Z)", reusable)
+        self.assertEqual(len(jobs), 3)
+        for job in jobs:
+            permissions = re.search(r"(?ms)^    permissions:\n(.*?)(?=^    [a-z][a-z0-9_-]*:|\Z)", job)
+            self.assertIsNotNone(permissions)
+            self.assertIn("pull-requests: read", permissions.group(1))
+            self.assertNotIn("pull-requests: write", permissions.group(1))
+        self.assertIn("pull-requests: read", caller)
+        self.assertIn("permission-checks: write", reusable)
+        self.assertIn("permission-pull-requests: write", reusable)
+        advisory = re.search(r"(?ms)^  advisory:\n(.*?)(?=^  [a-z][a-z0-9_-]*:\n|\Z)", reusable).group(1)
+        writer = re.search(r"(?ms)^  publish:\n(.*?)(?=^  [a-z][a-z0-9_-]*:\n|\Z)", reusable).group(1)
+        self.assertNotIn("!inputs.publish-conversations", advisory)
+        self.assertIn("permission-checks: write", advisory)
+        self.assertNotIn("permission-checks: write", writer)
+        self.assertIn("permission-pull-requests: write", writer)
+        self.assertNotIn("/check-runs", publisher)
+
     def test_older_distinct_run_cannot_overwrite_newer_same_revision_feedback(self):
         self.api.report = report([finding("reported")])
         self.api.receive()
         writes_after_newer = list(self.api.writes)
         self.api.run.update(id=99, run_number=3)
-        self.api.receive()
+        with self.assertRaisesRegex(Skip, "newer verified scan"):
+            self.api.receive()
         self.assertEqual(self.api.writes, writes_after_newer)
         self.assertEqual(len(self.api.issue_comments), 1)
 
@@ -385,8 +414,9 @@ class PublisherTests(unittest.TestCase):
         with self.assertRaisesRegex(Skip, "synthetic merge"):
             self.api.receive()
         self.assertEqual(len(self.api.review_comments), 1)
-        self.assertFalse(any(path.startswith("/issues/") or path.startswith("/check-runs")
-                             for _, path in self.api.writes))
+        self.assertEqual([path for method, path in self.api.writes if path.startswith("/issues/")],
+                         ["/issues/7/comments"])
+        self.assertFalse(any(path.startswith("/check-runs") for _, path in self.api.writes))
 
     def test_duplicate_findings_with_same_paths_but_distinct_ranges_survive(self):
         first = {"path": "new.ts", "language": "typescript", "scope": [],
