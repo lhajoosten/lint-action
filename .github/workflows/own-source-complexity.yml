@@ -12,6 +12,6 @@ permissions:
 
 jobs:
   complexity:
-    uses: lhajoosten/lint-gate/.github/workflows/source-complexity.yml@c16e2bc970050f33a95663066371eb7af5b812ca
+    uses: lhajoosten/lint-gate/.github/workflows/source-complexity.yml@29f1f1ad60c622090f1165b1e13ab920633c1234
     with:
       publish-report: true

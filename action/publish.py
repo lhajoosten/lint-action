@@ -1,27 +1,24 @@
-"""Publish an advisory check from a completed pull_request workflow."""
+"""Publish PR conversations from an independently verified pull_request scan."""
 
-from io import BytesIO
+from collections import Counter
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
-from zipfile import BadZipFile, ZipFile
-from zlib import error as CompressionError
+from urllib.parse import quote
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from app_report import REPORT_LIMIT, REPORT_NAME, SAMPLE_LIMIT, STATUSES
-
-CHECK = "Lint Gate (advisory)"
-CHECK_KEY = "lint-gate-advisory-v1"
 SHA = r"[0-9a-f]{40}"
 REPO = r"[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+"
 CANDIDATE = rf"Record candidate ([1-9][0-9]*) ({SHA}) ({SHA})"
+MAX_INLINE_THREADS = 50
+MAX_SUMMARY_FINDINGS = 50
 
 
 class Skip(Exception):
-    """No safely attributable check can be published."""
+    """No safely attributable conversation can be published."""
 
 
 class ApiError(Exception):
@@ -37,12 +34,13 @@ class NoRedirect(HTTPRedirectHandler):
 
 class GitHub:
     def __init__(self, base_url, repository, token):
+        self.base_url = base_url.rstrip("/")
         self.root = f"{base_url}/repos/{repository}"
         self.token = token
 
-    def request(self, path, method="GET", payload=None):
+    def request(self, path, method="GET", payload=None, api_root=False):
         request = Request(
-            self.root + path,
+            (self.base_url if api_root else self.root) + path,
             data=json.dumps(payload).encode() if payload is not None else None,
             headers={
                 "Authorization": f"Bearer {self.token}",
@@ -64,28 +62,56 @@ class GitHub:
         except HTTPError as error:
             raise ApiError(f"{method} {path}", error.code) from None
 
+    def json_api(self, path, method="GET", payload=None):
+        try:
+            with self.request(path, method, payload, api_root=True) as response:
+                data = response.read(4 * 1024**2 + 1)
+            if len(data) > 4 * 1024**2:
+                raise ValueError("GitHub API response exceeded its size limit.")
+            return json.loads(data)
+        except HTTPError as error:
+            raise ApiError(f"{method} {path}", error.code) from None
+
+    def graphql(self, query, variables=None):
+        request = Request(
+            f"{self.base_url}/graphql",
+            data=json.dumps({"query": query, "variables": variables or {}}).encode(),
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json",
+                "Content-Type": "application/json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            method="POST",
+        )
+        try:
+            with build_opener(NoRedirect).open(request, timeout=20) as response:
+                data = response.read(4 * 1024**2 + 1)
+            if len(data) > 4 * 1024**2:
+                raise ValueError("GitHub API response exceeded its size limit.")
+            result = json.loads(data)
+            if result.get("errors"):
+                errors = result["errors"]
+                if any("not accessible" in error.get("message", "").lower()
+                       or (error.get("extensions") or {}).get("type") == "FORBIDDEN"
+                       for error in errors):
+                    raise ApiError("review-thread operation", 403)
+                raise ValueError("GitHub rejected a review-thread operation.")
+            return result["data"]
+        except HTTPError as error:
+            raise ApiError("GraphQL review-thread operation", error.code) from None
+
     def pages(self, path, key):
         separator = "&" if "?" in path else "?"
         for page in range(1, 21):
             result = self.json(f"{path}{separator}per_page=100&page={page}")
-            yield from result[key]
-            if len(result[key]) < 100 or page * 100 >= result["total_count"]:
+            items = result if isinstance(result, list) else result[key]
+            yield from items
+            if len(items) < 100:
+                return
+            if isinstance(result, dict) and page * 100 >= result.get("total_count", page * 100):
                 return
         raise ValueError("GitHub API result exceeded its pagination limit.")
-
-    def artifact(self, artifact_id):
-        # GitHub redirects to a short-lived signed URL. Only the API gets the token.
-        try:
-            self.request(f"/actions/artifacts/{artifact_id}/zip").close()
-        except HTTPError as error:
-            with error:
-                location = error.headers.get("Location")
-                if error.code != 302 or not location or urlsplit(location).scheme != "https":
-                    raise ApiError("report download", error.code) from None
-            with urlopen(location, timeout=20) as response:
-                return response.read(REPORT_LIMIT + 1)
-        raise ValueError("GitHub did not return a signed report download URL.")
-
 
 def identity(run):
     return tuple(run[key] for key in ("id", "run_attempt", "workflow_id", "head_sha", "event"))
@@ -170,6 +196,19 @@ def target_head(api, run, number, revision, base, repository_id):
     return head["sha"]
 
 
+def verified_scan_target(api, event, workflow_file, source, job_name, repository_id):
+    """Bind the independent scan to the current PR merge and trusted source run."""
+    run = verified_run(api, event, workflow_file, source, repository_id)
+    number, revision, base, steps = candidate_job(api, run, job_name)
+    target = target_head(api, run, number, revision, base, repository_id)
+    path = source.rsplit("@", 1)[0]
+    references = [reference for reference in run.get("referenced_workflows", [])
+                  if source_matches(reference, source)]
+    scanner_sha = references[0]["sha"]
+    scanner_repository = path.split("/.github/workflows/", 1)[0]
+    return run, number, revision, base, target, scanner_repository, scanner_sha, steps
+
+
 def scan_outcome(steps):
     if steps.get("Record policy bootstrap") == "success" and steps.get("Scan source") == "skipped":
         return "bootstrap"
@@ -180,151 +219,377 @@ def scan_outcome(steps):
     return "incomplete"
 
 
-def unpack_report(archive):
-    if len(archive) > REPORT_LIMIT:
-        raise ValueError("Report archive exceeds the size limit.")
-    with ZipFile(BytesIO(archive)) as package:
-        entries = package.infolist()
-        if len(entries) != 1 or entries[0].filename != REPORT_NAME or entries[0].file_size > REPORT_LIMIT:
-            raise ValueError("Report archive has an unexpected file or size.")
-        with package.open(entries[0]) as stream:
-            data = stream.read(REPORT_LIMIT + 1)
-    if len(data) > REPORT_LIMIT:
-        raise ValueError("Report exceeds the size limit.")
-    return json.loads(data)
-
-
-def validate_report(report, run, revision, outcome):
-    if not isinstance(report, dict) or (report.get("version"), report.get("run_id"),
-                                       report.get("attempt"), report.get("revision")) != (
-        1, run["id"], run["run_attempt"], revision
-    ):
-        raise ValueError("Report identity mismatch.")
-    counts = report["counts"]
-    if not isinstance(counts, dict) or set(counts) != set(STATUSES):
-        raise ValueError("Invalid finding counts.")
-    for count in (report["files"], report["errors"], report["version"], report["run_id"],
-                  report["attempt"], *counts.values()):
-        if type(count) is not int or not 0 <= count <= 2**63 - 1:
-            raise ValueError("Invalid report count or identity.")
-    samples = report["samples"]
-    if not isinstance(samples, list) or len(samples) > SAMPLE_LIMIT or not all(
-        isinstance(sample, str) and len(sample) <= 300 for sample in samples
-    ):
-        raise ValueError("Invalid report samples.")
-    if outcome in ("passed", "blocking") and (
-        report["errors"] or bool(counts["blocking"]) != (outcome == "blocking")
-    ):
-        raise ValueError("Report disagrees with the recorded scan outcome.")
+def validate_scan_report(path):
+    if Path(path).stat().st_size > 16 * 1024 * 1024:
+        raise ValueError("Trusted scan report exceeded its size limit.")
+    report = json.loads(Path(path).read_bytes())
+    if (not isinstance(report, dict) or type(report.get("format_version")) is not int
+            or report["format_version"] not in (1, 2)
+            or type(report.get("scoring_version")) is not int
+            or type(report.get("files_scanned")) is not int
+            or report["files_scanned"] < 0 or report.get("diagnostics") != []
+            or not isinstance(report.get("findings"), list)):
+        raise ValueError("Trusted scan report is incomplete or invalid.")
+    for finding in report["findings"]:
+        if (not isinstance(finding, dict)
+                or finding.get("status") not in ("reported", "baselined", "blocking")
+                or not isinstance(finding.get("rule"), str)
+                or type(finding.get("score")) is not int
+                or type(finding.get("limit")) is not int):
+            raise ValueError("Trusted scan report contains an invalid finding.")
+        severity = finding.get("severity")
+        if (report["format_version"] >= 2 and severity not in ("error", "warn", "pass")
+                or severity is not None and severity not in ("error", "warn", "pass")
+                or finding["status"] == "blocking" and severity not in (None, "error")
+                or finding["status"] == "baselined" and severity not in (None, "error")
+                or finding["status"] == "reported" and severity == "pass"):
+            raise ValueError("Trusted scan report contains an invalid severity disposition.")
+        if finding["rule"] == "source-duplication":
+            if not isinstance(finding.get("occurrences"), list) or len(finding["occurrences"]) != 2:
+                raise ValueError("Trusted scan report contains an invalid duplication finding.")
+        elif not all(key in finding for key in ("path", "range", "name", "scope", "language")):
+            raise ValueError("Trusted scan report contains an invalid complexity finding.")
     return report
 
 
-def load_report(api, run, revision, outcome):
-    if outcome == "bootstrap":
-        return None, None
-    name = f"lint-gate-report-{run['id']}-{run['run_attempt']}"
-    query = urlencode({"name": name})
-    path = f"/actions/runs/{run['id']}/artifacts?{query}"
-    try:
-        artifacts = [item for item in api.pages(path, "artifacts") if item["name"] == name]
-        if not artifacts:
-            return None, "The analysis report is missing."
-        artifact, = artifacts
-        metadata = artifact["workflow_run"]
-        if (
-            artifact["expired"]
-            or type(artifact["id"]) is not int or artifact["id"] <= 0
-            or not 0 < artifact["size_in_bytes"] <= REPORT_LIMIT
-            or (metadata["id"], metadata["repository_id"], metadata["head_sha"])
-            != (run["id"], run["repository"]["id"], run["head_sha"])
-        ):
-            raise ValueError("Artifact metadata mismatch.")
-        return validate_report(unpack_report(api.artifact(artifact["id"])), run, revision, outcome), None
-    except (ApiError, BadZipFile, CompressionError, EOFError, KeyError, OSError,
-            RecursionError, RuntimeError, TypeError, ValueError, NotImplementedError):
-        return None, "The analysis report is unusable."
+def code(value):
+    if isinstance(value, str) and len(value) > 200:
+        value = value[:197] + "..."
+    safe = json.dumps(value, ensure_ascii=False)
+    safe = safe.replace("`", r"\u0060").replace("@", r"\u0040").replace("<", r"\u003c")
+    return "`" + safe + "`"
 
 
-def check_output(outcome, report, report_error, revision, target, details_url):
-    title, conclusion = {
-        "bootstrap": ("Policy bootstrap", "skipped"),
-        "passed": ("Clean", "success"),
-        "blocking": ("Blocking policy findings", "neutral"),
-        "incomplete": ("Analysis incomplete", "neutral"),
-    }[outcome]
-    summary = [f"[Open the analysis run]({details_url})",
-               f"PR head `{target}` · GitHub synthetic merge tree `{revision}`"]
-    if outcome == "bootstrap":
-        summary.append("The PR base has no Lint Gate policy yet. The scan was skipped for bootstrap.")
-    if report_error:
-        summary.append(report_error)
-        if outcome == "passed":
-            title, conclusion = "Report unavailable", "neutral"
-    if report:
-        counts = report["counts"]
-        if outcome == "passed" and (counts["reported"] or counts["baselined"]):
-            title, conclusion = "Warnings", "neutral"
-        summary.append(
-            f'Files scanned {report["files"]} · Analysis errors {report["errors"]} · '
-            f'Reported {counts["reported"]} · Baselined {counts["baselined"]} · Blocking {counts["blocking"]}'
-        )
-        if report["samples"]:
-            samples = [json.dumps(sample).replace("`", r"\u0060") for sample in report["samples"]]
-            summary.append("```text\n" + "\n".join(samples) + "\n```")
-    return {
-        "name": CHECK, "status": "completed", "conclusion": conclusion, "details_url": details_url,
-        "output": {"title": title, "summary": "\n\n".join(summary)},
-    }
-
-
-def upsert(api, app_id, run, target, payload):
-    prefix = f"{CHECK_KEY}:{run['repository']['id']}:{target}:"
-    order = (run["run_number"], run["run_attempt"])
-    query = urlencode({"check_name": CHECK, "app_id": app_id, "filter": "all"})
-    matches = []
-    for check in api.pages(f"/commits/{target}/check-runs?{query}", "check_runs"):
-        if check["name"] != CHECK or check["head_sha"] != target or check["app"]["id"] != app_id:
-            continue
-        external_id = check.get("external_id") or ""
-        version = re.fullmatch(r"([0-9]+):([0-9]+):([0-9]+)", external_id.removeprefix(prefix))
-        if external_id.startswith(prefix) and version:
-            number, attempt, run_id = map(int, version.groups())
-            matches.append(((number, attempt), run_id, check["id"]))
-
-    version = f"{order[0]}:{order[1]}:{run['id']}"
-    payload = {**payload, "external_id": prefix + version}
-    if matches:
-        recorded, recorded_run, check_id = max(matches)
-        if recorded > order or recorded == order and recorded_run == run["id"]:
-            return "The advisory check already holds this result or a newer one."
-        check = api.json(f"/check-runs/{check_id}", "PATCH", payload)
+def finding_identity(finding):
+    if finding["rule"] == "source-duplication":
+        identities = [
+            {"path": occurrence.get("path"), "range": occurrence.get("range")}
+            for occurrence in finding["occurrences"]
+        ]
+        payload = {"rule": finding["rule"], "occurrences": sorted(identities, key=lambda x: json.dumps(x, sort_keys=True))}
     else:
-        check = api.json("/check-runs", "POST", {**payload, "head_sha": target})
-    if (check["head_sha"], check["app"]["id"], check["name"]) != (target, app_id, CHECK):
-        raise ValueError("GitHub returned a check with an unexpected App, name, or commit.")
-    return f"Published {CHECK} on PR head {target}."
+        payload = {key: finding.get(key) for key in ("rule", "path", "language", "scope", "name")}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest(), payload
 
 
-def publish(api, checks, event, workflow_file, source, job_name, repository_id, app_id, repository_url):
-    run = verified_run(api, event, workflow_file, source, repository_id)
-    number, revision, base, steps = candidate_job(api, run, job_name)
-    try:
-        target = target_head(api, run, number, revision, base, repository_id)
-    except ApiError as error:
-        if error.status == 404:
-            raise Skip("GitHub can no longer resolve the PR or its synthetic merge.") from None
-        raise
+def line_anchor(finding, files, compatible_paths=None):
+    locations = finding["occurrences"] if finding["rule"] == "source-duplication" else [finding]
+    for location in locations:
+        path = location.get("path")
+        if compatible_paths is not None and path not in compatible_paths:
+            continue
+        start = location.get("range", {}).get("start", {}).get("line")
+        if (not isinstance(path, str) or path.startswith("/") or "\\" in path
+                or any(part in ("", ".", "..") for part in path.split("/"))
+                or type(start) is not int or start < 1):
+            continue
+        for file in files:
+            if file.get("filename") != path or file.get("status") == "removed":
+                continue
+            patch = file.get("patch")
+            if not isinstance(patch, str):
+                break
+            current = 0
+            for line in patch.splitlines():
+                match = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
+                if match:
+                    current = int(match.group(1))
+                    count = int(match.group(2) or "1")
+                    if current <= start < current + count:
+                        return path, start
+                elif line.startswith("+") and not line.startswith("+++"):
+                    current += 1
+                elif line.startswith(" "):
+                    current += 1
+            break
+    return None
+
+
+def review_anchor(finding, files, compatible_paths=None):
+    line = line_anchor(finding, files, compatible_paths)
+    if line:
+        return ("line", *line)
+    locations = finding["occurrences"] if finding["rule"] == "source-duplication" else [finding]
+    for location in locations:
+        path = location.get("path")
+        if (isinstance(path, str) and not path.startswith("/") and "\\" not in path
+                and not any(part in ("", ".", "..") for part in path.split("/"))
+                and any(file.get("filename") == path and file.get("status") != "removed" for file in files)):
+            return ("file", path)
+    return None
+
+
+def verified_app_actor(api, app_slug):
+    if not app_slug:
+        return None
+    login = f"{app_slug}[bot]"
+    actor = api.json_api(f"/users/{quote(login, safe='')}")
+    if actor.get("login") != login or actor.get("type") != "Bot" or type(actor.get("id")) is not int:
+        raise ValueError("GitHub did not resolve the configured App bot actor.")
+    return actor["id"]
+
+
+def owned(comment, app_id, app_slug, app_actor_id):
+    app = comment.get("performed_via_github_app") or {}
+    if app.get("id") == app_id:
+        return True
+    user = comment.get("user") or {}
+    return bool(app_actor_id and user.get("type") == "Bot" and user.get("id") == app_actor_id
+                and user.get("login") == f"{app_slug}[bot]")
+
+
+def thread_data(api, number):
+    owner, name = os.environ["GITHUB_REPOSITORY"].split("/", 1)
+    query = """query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
+      repository(owner:$owner, name:$name) {
+        pullRequest(number:$number) {
+          reviewThreads(first:100, after:$cursor) {
+            nodes { id isResolved comments(first:100) { nodes { databaseId body } } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }"""
+    cursor = None
+    for _ in range(20):
+        data = api.graphql(query, {"owner": owner, "name": name, "number": number, "cursor": cursor})
+        connection = data["repository"]["pullRequest"]["reviewThreads"]
+        yield from connection["nodes"]
+        if not connection["pageInfo"]["hasNextPage"]:
+            return
+        cursor = connection["pageInfo"]["endCursor"]
+    raise ValueError("Review threads exceeded their pagination limit.")
+
+
+def set_thread_resolved(api, thread_id, resolved):
+    mutation_name = "resolveReviewThread" if resolved else "unresolveReviewThread"
+    mutation = f"""mutation($id:ID!) {{ {mutation_name}(input:{{threadId:$id}}) {{ thread {{ id isResolved }} }} }}"""
+    api.graphql(mutation, {"id": thread_id})
+
+
+FEEDBACK_ORDER = re.compile(r"<!-- lint-gate-feedback:v1:([0-9]+):([0-9]+):([0-9]+) -->")
+
+
+def feedback_order_marker(order):
+    return f"<!-- lint-gate-feedback:v1:{order[0]}:{order[1]}:{order[2]} -->"
+
+
+def reconcile_feedback(api, app_id, app_slug, app_actor_id, number, head, details_url,
+                       report, verify_current, compatible_paths, order):
+    findings = report["findings"]
+    blocking = []
+    summary_items = []
+    files = list(api.pages(f"/pulls/{number}/files", "files"))
+    for finding in findings:
+        if finding["status"] == "baselined":
+            continue
+        if finding["status"] == "reported":
+            summary_items.append(("Warning", finding))
+        else:
+            identity, _ = finding_identity(finding)
+            blocking.append((identity, finding))
+
+    identity_counts = Counter(identity for identity, _ in blocking)
+    blockers = {}
+    for identity, finding in blocking:
+        if identity_counts[identity] > 1 and finding["rule"] != "source-duplication":
+            # Keep location-independent IDs for unique callables and use ranges only to break ties.
+            identity_and_range = json.dumps([identity, finding["range"]], sort_keys=True)
+            identity = hashlib.sha256(identity_and_range.encode()).hexdigest()
+        blockers[identity] = finding
+
+    rest_comments = list(api.pages(f"/pulls/{number}/comments", "comments"))
+    issue_comments = list(api.pages(f"/issues/{number}/comments", "comments"))
+    owned_rest = [comment for comment in rest_comments if owned(comment, app_id, app_slug, app_actor_id)]
+    owned_issue = [comment for comment in issue_comments if owned(comment, app_id, app_slug, app_actor_id)]
+    recorded_orders = [tuple(map(int, match.groups()))
+                       for comment in owned_rest + owned_issue
+                       for match in [FEEDBACK_ORDER.search(comment.get("body", ""))] if match]
+    if recorded_orders and max(recorded_orders) > order:
+        raise Skip("A newer verified scan already published PR feedback.")
+    summary_comments = [comment for comment in owned_issue
+                        if "<!-- lint-gate-warning-summary -->" in comment.get("body", "")]
+    verify_current()
+    order_marker = feedback_order_marker(order)
+    if summary_comments:
+        first = summary_comments[0]
+        reserved_body = FEEDBACK_ORDER.sub("", first.get("body", "")).strip()
+        reserved_body = f"{order_marker}\n{reserved_body}"
+        if first.get("body") != reserved_body:
+            first.update(api.json(f"/issues/comments/{first['id']}", "PATCH", {"body": reserved_body}))
+    else:
+        reserved = api.json(f"/issues/{number}/comments", "POST", {
+            "body": f"{order_marker}\n<!-- lint-gate-warning-summary -->",
+        })
+        summary_comments = [reserved]
+    by_marker = {}
+    for comment in owned_rest:
+        match = re.search(r"<!-- lint-gate-finding:([0-9a-f]{64}) -->", comment.get("body", ""))
+        if match:
+            by_marker.setdefault(match.group(1), []).append(comment)
+    threads = list(thread_data(api, number))
+    verify_current()
+    active_by_identity = {}
+    for thread in threads:
+        comment_ids = {node["databaseId"] for node in thread["comments"]["nodes"]}
+        marker = next((key for key, comments in by_marker.items()
+                       if any(comment["id"] in comment_ids for comment in comments)), None)
+        if marker:
+            current = active_by_identity.get(marker)
+            if current is None or current["isResolved"] and not thread["isResolved"]:
+                active_by_identity[marker] = thread
+
+    active_count = sum(
+        identity in blockers and not thread["isResolved"]
+        for identity, thread in active_by_identity.items()
+    )
+    for identity, finding in blockers.items():
+        thread = active_by_identity.get(identity)
+        anchor = review_anchor(finding, files, compatible_paths)
+        if thread:
+            thread_ids = {node["databaseId"] for node in thread["comments"]["nodes"]}
+            existing = next((comment for comment in by_marker[identity]
+                             if comment["id"] in thread_ids), None)
+            existing_anchor = (("line", existing.get("path"), existing.get("line"))
+                               if existing and existing.get("line") else
+                               ("file", existing.get("path")) if existing else None)
+            if anchor and existing and existing_anchor == anchor:
+                body = (f"{order_marker}\n<!-- lint-gate-finding:{identity} -->\n**Lint Gate blocking finding**\n\n"
+                    f"Rule {code(finding['rule'])} {code(finding.get('name', ''))} "
+                    f"({code(finding.get('severity', 'error'))}) at {code(anchor[1])}"
+                        f"{':' + str(anchor[2]) if anchor[0] == 'line' else ''}; score {code(finding['score'])}, "
+                        f"limit {code(finding['limit'])}.\n\n[Open the verified scan]({details_url})")
+                if thread["isResolved"]:
+                    if active_count >= MAX_INLINE_THREADS:
+                        summary_items.append(("Blocking error (thread limit reached)", finding))
+                        continue
+                    verify_current()
+                    set_thread_resolved(api, thread["id"], False)
+                    active_count += 1
+                if existing.get("body") != body:
+                    verify_current()
+                    api.json(f"/pulls/comments/{existing['id']}", "PATCH", {"body": body})
+                continue
+            if not thread["isResolved"]:
+                verify_current()
+                set_thread_resolved(api, thread["id"], True)
+                active_count -= 1
+        if anchor and active_count >= MAX_INLINE_THREADS:
+            summary_items.append(("Blocking error (thread limit reached)", finding))
+            continue
+        if anchor:
+            path = anchor[1]
+            body = (f"{order_marker}\n<!-- lint-gate-finding:{identity} -->\n**Lint Gate blocking finding**\n\n"
+                    f"Rule {code(finding['rule'])} {code(finding.get('name', ''))} "
+                    f"({code(finding.get('severity', 'error'))}) at {code(path)}"
+                    f"{':' + str(anchor[2]) if anchor[0] == 'line' else ''}; score "
+                    f"{code(finding['score'])}, limit {code(finding['limit'])}.\n\n"
+                    f"[Open the verified scan]({details_url})")
+            payload = {"body": body, "commit_id": head, "path": path}
+            if anchor[0] == "line":
+                payload.update(line=anchor[2], side="RIGHT")
+            else:
+                payload["subject_type"] = "file"
+            try:
+                verify_current()
+                api.json(f"/pulls/{number}/comments", "POST", payload)
+                active_count += 1
+                continue
+            except ApiError as error:
+                if error.status not in (404, 422):
+                    raise
+        summary_items.append(("Unanchored blocking error", finding))
+
+    for identity, thread in active_by_identity.items():
+        if identity not in blockers and not thread["isResolved"]:
+            verify_current()
+            set_thread_resolved(api, thread["id"], True)
+
+    parts = [order_marker, "<!-- lint-gate-warning-summary -->", "## Lint Gate findings",
+             f"[Open the verified scan]({details_url})"]
+    for heading, finding in summary_items[:MAX_SUMMARY_FINDINGS]:
+        location = finding.get("path")
+        if not location and finding.get("occurrences"):
+            location = ", ".join(item.get("path", "") for item in finding["occurrences"])
+        severity = finding.get("severity", "error" if finding["status"] == "blocking" else "warn")
+        parts.append(f"- **{heading}** · {code(finding['rule'])} · {code(severity)} · "
+                     f"{code(finding.get('name', ''))} · "
+                     f"{code(location or 'location unavailable')} · "
+                     f"score {code(finding['score'])}, limit {code(finding['limit'])}")
+    if len(summary_items) > MAX_SUMMARY_FINDINGS:
+        parts.append(f"\nShowing {MAX_SUMMARY_FINDINGS} of {len(summary_items)} findings; use the scan link for the full report.")
+    if not summary_items:
+        parts.append("No reported warnings or unanchored blocking findings remain.")
+    payload = {"body": "\n\n".join(parts)}
+    if summary_comments:
+        first = summary_comments[0]
+        verify_current()
+        api.json(f"/issues/comments/{first['id']}", "PATCH", payload)
+    else:
+        verify_current()
+        api.json(f"/issues/{number}/comments", "POST", payload)
+
+
+def publish(api, writes, event, workflow_file, source, job_name, repository_id, app_id, repository_url):
+    run, number, revision, base, target, scanner_repository, scanner_sha, steps = verified_scan_target(
+        api, event, workflow_file, source, job_name, repository_id,
+    )
+    expected = {
+        "PULL_REQUEST": str(number), "VERIFIED_REVISION": revision,
+        "VERIFIED_BASE": base, "VERIFIED_HEAD": target, "SOURCE_RUN": str(run["id"]),
+        "SOURCE_ATTEMPT": str(run["run_attempt"]),
+        "VERIFIED_SCANNER_REPOSITORY": scanner_repository,
+        "VERIFIED_SCANNER_SHA": scanner_sha,
+    }
+    if any(os.environ.get(key) != value for key, value in expected.items()):
+        raise Skip("The verified scan target changed before publication.")
     outcome = scan_outcome(steps)
-    report, report_error = load_report(api, run, revision, outcome)
+    source_outcome = os.environ.get("SOURCE_OUTCOME")
+    if source_outcome != outcome:
+        raise Skip("The native scan result disagreed with the verified publication job.")
     details_url = f"{repository_url}/actions/runs/{run['id']}/attempts/{run['run_attempt']}"
-    payload = check_output(outcome, report, report_error, revision, target, details_url)
-    try:
-        return upsert(checks, app_id, run, target, payload)
-    except ApiError as error:
-        if error.status in (404, 422):
-            raise Skip(f"GitHub could not attach the check to this PR head. {error} "
-                       "Verify the installation has Checks write for this repository.") from None
-        raise
+    if os.environ.get("DETAILS_URL") != details_url:
+        raise Skip("The verified scan link did not match the current source run.")
+    def verify_current():
+        current = verified_scan_target(api, event, workflow_file, source, job_name, repository_id)
+        current_run, current_number, current_revision, current_base, current_head, current_repository, current_sha, _ = current
+        if (identity(current_run) != identity(run) or
+                (current_number, current_revision, current_base, current_head,
+                 current_repository, current_sha) !=
+                (number, revision, base, target, scanner_repository, scanner_sha)):
+            raise Skip("The PR or scanner changed before feedback was written.")
+
+    if outcome in ("bootstrap", "incomplete"):
+        verify_current()
+        return "No complete verified scan is available for PR conversations."
+    if outcome not in ("passed", "blocking"):
+        raise Skip("The source run has no publishable analysis outcome.")
+    if os.environ.get("SCAN_COMPLETE") != "true":
+        verify_current()
+        return "No complete verified scan is available for PR conversations."
+    report = validate_scan_report(os.environ["FINDINGS_REPORT"])
+    has_blocking = any(item["status"] == "blocking" for item in report["findings"])
+    if has_blocking != (outcome == "blocking"):
+        raise Skip("The independent scan disagreed with the native policy gate result.")
+
+    order = (run["run_number"], run["run_attempt"], run["id"])
+
+    manifest_path = os.environ.get("FINDINGS_MANIFEST")
+    compatible_paths = None
+    if manifest_path:
+        manifest = json.loads(Path(manifest_path).read_bytes())
+        if ((manifest.get("revision"), manifest.get("base"), manifest.get("head"),
+             manifest.get("source_run"), manifest.get("source_attempt"), manifest.get("artifact_name")) !=
+                (revision, base, target, str(run["id"]), str(run["run_attempt"]),
+                 os.environ.get("FINDINGS_ARTIFACT_NAME"))):
+            raise Skip("The source coordinate manifest does not match the verified PR target.")
+        compatible_paths = set(manifest.get("compatible_paths", []))
+    app_slug = os.environ.get("APP_SLUG", "")
+    app_actor_id = verified_app_actor(api, app_slug)
+    reconcile_feedback(writes, app_id, app_slug, app_actor_id, number, target, details_url,
+                       report, verify_current, compatible_paths, order)
+    return "Published PR conversations from the verified scan."
 
 
 def main():
@@ -337,17 +602,17 @@ def main():
     ):
         raise SystemExit("Invalid analysis workflow configuration. Check the publisher inputs.")
     api = GitHub(env["GITHUB_API_URL"], repository, env["GITHUB_TOKEN"])
-    checks = GitHub(env["GITHUB_API_URL"], repository, env["APP_TOKEN"])
+    writes = GitHub(env["GITHUB_API_URL"], repository, env["APP_TOKEN"])
     try:
         message = publish(
-            api, checks, json.loads(Path(env["GITHUB_EVENT_PATH"]).read_bytes()),
+            api, writes, json.loads(Path(env["GITHUB_EVENT_PATH"]).read_bytes()),
             workflow, source, env["ANALYSIS_JOB"], int(env["GITHUB_REPOSITORY_ID"]),
             int(env["APP_ID"]), f"{env['GITHUB_SERVER_URL']}/{repository}",
         )
     except Skip as error:
         message = f"Skipped App publication. {error}"
     except ApiError as error:
-        raise SystemExit(f"{error} Verify the workflow read permissions and the App installation's Checks write permission.")
+        raise SystemExit(f"{error} Verify the workflow read permissions and the App installation's Pull requests write permission.")
     except (URLError, TimeoutError):
         raise SystemExit("GitHub could not be reached. Rerun the publisher to retry.")
     except (KeyError, TypeError, ValueError):

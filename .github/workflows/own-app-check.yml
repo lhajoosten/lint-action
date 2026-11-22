@@ -15,8 +15,9 @@ jobs:
     uses: ./.github/workflows/publish-app-check.yml
     with:
       enabled: ${{ vars.LINT_GATE_APP_PUBLISH == 'true' }}
+      publish-conversations: ${{ vars.LINT_GATE_APP_CONVERSATIONS == 'true' }}
       app-id: ${{ vars.LINT_GATE_APP_ID }}
       source-workflow: own-source-complexity.yml
-      scanner-workflow: lhajoosten/lint-gate/.github/workflows/source-complexity.yml@c16e2bc970050f33a95663066371eb7af5b812ca
+      scanner-workflow: lhajoosten/lint-gate/.github/workflows/source-complexity.yml@29f1f1ad60c622090f1165b1e13ab920633c1234
     secrets:
       app-private-key: ${{ secrets.LINT_GATE_APP_PRIVATE_KEY }}
