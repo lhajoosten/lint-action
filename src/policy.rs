@@ -22,10 +22,20 @@ pub enum Mode {
     Baseline,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Severity {
+    Pass,
+    Warn,
+    Error,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     mode: Mode,
+    #[serde(default)]
+    severities: BTreeMap<Rule, Severity>,
     #[serde(default = "default_limits")]
     limits: BTreeMap<Language, u32>,
     #[serde(default)]
@@ -51,6 +61,7 @@ fn default_min_tokens() -> u32 {
 
 pub struct Policy {
     pub mode: Mode,
+    severities: BTreeMap<Rule, Severity>,
     pub duplication_minimum: Option<u32>,
     limits: BTreeMap<Language, u32>,
     cognitive_limits: BTreeMap<Language, u32>,
@@ -91,12 +102,45 @@ impl Policy {
         }
         Ok(Self {
             mode: config.mode,
+            severities: config.severities,
             duplication_minimum,
             limits: config.limits,
             cognitive_limits: config.cognitive_limits,
             include: compile_globs(&config.include).map_err(invalid)?,
             exclude: compile_globs(&config.exclude).map_err(invalid)?,
         })
+    }
+
+    pub fn severity(&self, rule: Rule) -> Severity {
+        self.severities
+            .get(&rule)
+            .copied()
+            .unwrap_or(Severity::Error)
+    }
+
+    pub fn active(&self, rule: Rule) -> bool {
+        self.severity(rule) != Severity::Pass
+    }
+
+    pub fn any_active(&self) -> bool {
+        (self.active(Rule::CyclomaticComplexity) && !self.limits.is_empty())
+            || (self.active(Rule::CognitiveComplexity)
+                && self
+                    .limits
+                    .keys()
+                    .any(|language| Rule::CognitiveComplexity.supports(*language)))
+            || (self.active(Rule::SourceDuplication) && self.duplication_minimum.is_some())
+    }
+
+    pub fn active_for(&self, language: Language, rule: Rule) -> bool {
+        self.active(rule)
+            && match rule {
+                Rule::CyclomaticComplexity => self.limits.contains_key(&language),
+                Rule::CognitiveComplexity => self.limit(language, rule).is_some(),
+                Rule::SourceDuplication => {
+                    self.duplication_minimum.is_some() && rule.supports(language)
+                }
+            }
     }
 
     pub fn limit(&self, language: Language, rule: Rule) -> Option<u32> {
@@ -227,45 +271,33 @@ fn valid_identity(identity: &Identity) -> bool {
 }
 
 impl Baseline {
-    pub fn load(path: &Path) -> Result<BaselineScores, Diagnostic> {
-        Self::load_review(path).map(|(_, scores)| scores)
-    }
-
-    pub fn load_review(path: &Path) -> Result<(Self, BaselineScores), Diagnostic> {
+    pub fn read(path: &Path) -> Result<Self, Diagnostic> {
         let invalid = |message: String| policy_error(ErrorKind::InvalidBaseline, path, message);
-        let baseline: Self = read_json(path, MAX_BASELINE_BYTES).map_err(invalid)?;
+        let mut baseline: Self = read_json(path, MAX_BASELINE_BYTES).map_err(invalid)?;
         if baseline.scoring_version != SCORING_VERSION {
             return Err(invalid(format!(
                 "baseline scoring version {} differs from {SCORING_VERSION}",
                 baseline.scoring_version
             )));
         }
-        let mut scores = BaselineScores::default();
         for Entry {
             rule,
             identity,
             score,
-        } in baseline.entries.iter().cloned()
+        } in &baseline.entries
         {
-            if !valid_identity(&identity)
+            if !valid_identity(identity)
                 || !rule.supports(identity.language)
-                || rule == Rule::SourceDuplication
-                || score == 0
+                || *rule == Rule::SourceDuplication
+                || *score == 0
             {
                 return Err(invalid(format!(
                     "invalid baseline entry for {:?}",
                     identity.path
                 )));
             }
-            scores
-                .complexity
-                .entry(rule)
-                .or_default()
-                .entry(identity)
-                .and_modify(|value| *value = None)
-                .or_insert(Some(score));
         }
-        for mut entry in baseline.duplication_entries.iter().cloned() {
+        for entry in &mut baseline.duplication_entries {
             let [left, right] = &entry.occurrences;
             if left == right
                 || entry.occurrences.iter().any(|identity| {
@@ -283,28 +315,81 @@ impl Baseline {
                 return Err(invalid("invalid source duplication baseline entry".into()));
             }
             entry.occurrences.sort();
+        }
+        Ok(baseline)
+    }
+
+    pub fn load(path: &Path) -> Result<BaselineScores, Diagnostic> {
+        let baseline = Self::read(path)?;
+        let mut scores = BaselineScores::default();
+        for Entry {
+            rule,
+            identity,
+            score,
+        } in baseline.entries
+        {
+            scores
+                .complexity
+                .entry(rule)
+                .or_default()
+                .entry(identity)
+                .and_modify(|value| *value = None)
+                .or_insert(Some(score));
+        }
+        for entry in baseline.duplication_entries {
             scores
                 .duplication
                 .entry(entry.occurrences.clone())
                 .and_modify(|value| *value = None)
                 .or_insert(Some(entry));
         }
-        Ok((baseline, scores))
+        Ok(scores)
+    }
+
+    pub fn preserve_advisory(&mut self, path: &Path, policy: &Policy) -> Result<(), Diagnostic> {
+        if policy
+            .severities
+            .values()
+            .all(|level| *level == Severity::Error)
+        {
+            return Ok(());
+        }
+        match fs::symlink_metadata(path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(policy_error(
+                    ErrorKind::InvalidBaseline,
+                    path,
+                    error.to_string(),
+                ));
+            }
+            Ok(_) => {}
+        }
+        let previous = Self::read(path)?;
+        self.entries.extend(
+            previous
+                .entries
+                .into_iter()
+                .filter(|entry| policy.severity(entry.rule) != Severity::Error),
+        );
+        if policy.severity(Rule::SourceDuplication) != Severity::Error {
+            self.duplication_entries
+                .extend(previous.duplication_entries);
+        }
+        Ok(())
     }
 
     pub fn generate<'a>(
         callables: impl Iterator<Item = &'a Callable>,
         matches: impl Iterator<Item = (Pair, &'a Match<'a>)>,
     ) -> Result<Self, Diagnostic> {
-        let mut entries: Vec<_> = callables
+        let entries = callables
             .map(|callable| Entry {
                 rule: callable.rule,
                 identity: callable.identity.clone(),
                 score: callable.score,
             })
             .collect();
-        entries
-            .sort_by(|left, right| (&left.identity, left.rule).cmp(&(&right.identity, right.rule)));
         let mut duplication_entries = Vec::new();
         let mut remaining_bytes = MAX_BASELINE_BYTES;
         for (occurrences, found) in matches {
@@ -323,7 +408,6 @@ impl Baseline {
                 .ok_or_else(baseline_too_large)?;
             duplication_entries.push(entry);
         }
-        duplication_entries.sort_by(|left, right| left.occurrences.cmp(&right.occurrences));
         Ok(Self {
             scoring_version: SCORING_VERSION,
             entries,
@@ -331,8 +415,12 @@ impl Baseline {
         })
     }
 
-    pub fn to_json(&self) -> Result<Vec<u8>, Diagnostic> {
-        let mut json = serde_json::to_vec_pretty(self).expect("baseline serializes to JSON");
+    pub fn into_json(mut self) -> Result<Vec<u8>, Diagnostic> {
+        self.entries
+            .sort_by(|left, right| (&left.identity, left.rule).cmp(&(&right.identity, right.rule)));
+        self.duplication_entries
+            .sort_by(|left, right| left.occurrences.cmp(&right.occurrences));
+        let mut json = serde_json::to_vec_pretty(&self).expect("baseline serializes to JSON");
         json.push(b'\n');
         if json.len() as u64 > MAX_BASELINE_BYTES {
             return Err(baseline_too_large());
