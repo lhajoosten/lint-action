@@ -171,13 +171,13 @@ impl Match<'_> {
         (block.tokens[end].anchor == Some(anchor)).then(|| &block.anchors[anchor])
     }
 
-    pub fn is_part_of(&self, accepted: &[String]) -> bool {
+    pub fn is_part_of<'a>(&self, accepted: impl ExactSizeIterator<Item = &'a str>) -> bool {
         let tokens = self.tokens();
         if tokens.len() > accepted.len() {
             return false;
         }
         if tokens.len() == accepted.len() {
-            return tokens.eq(accepted.iter().map(String::as_str));
+            return tokens.eq(accepted);
         }
 
         // Search linearly for the shorter run inside the accepted token sequence.
