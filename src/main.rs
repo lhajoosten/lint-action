@@ -41,6 +41,11 @@ enum Command {
         /// Optional files or directories relative to the scan root.
         paths: Vec<PathBuf>,
     },
+    /// Propose safe reductions to an existing baseline as a JSON Patch.
+    BaselineReview {
+        #[command(flatten)]
+        settings: Settings,
+    },
     /// Check configuration and its baseline without scanning source.
     Validate {
         #[command(flatten)]
@@ -80,11 +85,17 @@ struct Settings {
 }
 
 impl Settings {
+    fn baseline_path(&self) -> PathBuf {
+        self.baseline
+            .clone()
+            .unwrap_or_else(|| self.input.config_path().with_file_name(BASELINE_FILE))
+    }
+
     fn baseline(&self, mode: Mode) -> Result<BaselineScores, Diagnostic> {
         if let Some(path) = &self.baseline {
             Baseline::load(path)
         } else if mode == Mode::Baseline {
-            Baseline::load(&self.input.config_path().with_file_name(BASELINE_FILE))
+            Baseline::load(&self.baseline_path())
         } else {
             Ok(BaselineScores::default())
         }
@@ -315,6 +326,272 @@ fn generate(
     baseline.into_json().map(Some)
 }
 
+#[derive(Serialize)]
+struct PatchOperation {
+    op: &'static str,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<serde_json::Value>,
+}
+
+fn patch_value(op: &'static str, path: String, value: serde_json::Value) -> PatchOperation {
+    PatchOperation {
+        op,
+        path,
+        value: Some(value),
+    }
+}
+
+fn patch_remove(path: String) -> PatchOperation {
+    PatchOperation {
+        op: "remove",
+        path,
+        value: None,
+    }
+}
+
+fn review_baseline(
+    settings: &Settings,
+    report: &mut Report,
+) -> Result<Option<Vec<PatchOperation>>, Diagnostic> {
+    let policy = settings.input.policy()?;
+    report.mode = Some(policy.mode);
+    let baseline_path = settings.baseline_path();
+    let baseline = Baseline::read(&baseline_path)?;
+    let scanned = scan::scan(&settings.input.root, &[], &policy);
+    report.files_scanned = scanned.files_scanned;
+    report.files_skipped = scanned.files_skipped;
+    let Analysis {
+        callables,
+        mut diagnostics,
+        scope_counts,
+        duplication,
+    } = scanned.analysis;
+    let matches = duplication_matches(&policy, &duplication, &mut diagnostics);
+    report.diagnostics = diagnostics;
+    if !report.diagnostics.is_empty() {
+        return Ok(None);
+    }
+
+    let mut operations = Vec::new();
+    let mut entry_indices: BTreeMap<(Rule, Identity), Vec<usize>> = BTreeMap::new();
+    for (index, entry) in baseline.entries.iter().enumerate() {
+        entry_indices
+            .entry((entry.rule, entry.identity.clone()))
+            .or_default()
+            .push(index);
+    }
+    let mut current = BTreeMap::new();
+    for callable in &callables {
+        current.insert((callable.rule, callable.identity.clone()), callable.score);
+    }
+    for ((rule, identity), indices) in entry_indices {
+        if policy.severity(rule) != Severity::Error
+            || policy.limit(identity.language, rule).is_none()
+        {
+            eprintln!(
+                "baseline-review: deferred inactive complexity rule {:?} for {}",
+                rule, identity.path
+            );
+            continue;
+        }
+        if !policy.includes(std::path::Path::new(&identity.path)) {
+            eprintln!(
+                "baseline-review: deferred complexity entry outside policy selection for {}",
+                identity.path
+            );
+            continue;
+        }
+        if indices.len() != 1 {
+            eprintln!(
+                "baseline-review: deferred ambiguous complexity entries for {} ({:?})",
+                identity.path, identity.scope
+            );
+            continue;
+        }
+        let index = indices[0];
+        match current.get(&(rule, identity.clone())) {
+            Some(&score)
+                if unique(&identity, &scope_counts)
+                    && policy
+                        .limit(identity.language, rule)
+                        .is_some_and(|limit| score <= u64::from(limit)) =>
+            {
+                operations.push(patch_remove(format!("/entries/{index}")));
+            }
+            Some(&score)
+                if unique(&identity, &scope_counts) && score < baseline.entries[index].score =>
+            {
+                operations.push(patch_value(
+                    "replace",
+                    format!("/entries/{index}/score"),
+                    serde_json::json!(score),
+                ));
+            }
+            Some(_) if !unique(&identity, &scope_counts) => {
+                eprintln!(
+                    "baseline-review: deferred ambiguous callable identity for {} ({:?})",
+                    identity.path, identity.scope
+                );
+            }
+            Some(&score) => eprintln!(
+                "baseline-review: preserved unchanged or worsened callable {} ({:?}) at score {}",
+                identity.path, identity.scope, score
+            ),
+            None if !scope_counts.contains_key(&identity) => {
+                operations.push(patch_remove(format!("/entries/{index}")));
+            }
+            None => eprintln!(
+                "baseline-review: deferred ambiguous callable identity for {} ({:?})",
+                identity.path, identity.scope
+            ),
+        }
+    }
+
+    let pairs = match_pairs(&matches, &scope_counts);
+    let mut found_by_pair: BTreeMap<Pair, Vec<(&Match<'_>, usize)>> = BTreeMap::new();
+    let mut baseline_pair_counts = BTreeMap::<Pair, usize>::new();
+    for entry in &baseline.duplication_entries {
+        let mut pair = entry.occurrences.clone();
+        pair.sort();
+        *baseline_pair_counts.entry(pair).or_default() += 1;
+    }
+    for (found, pair) in matches.iter().zip(pairs) {
+        if let Some(pair) = pair {
+            found_by_pair
+                .entry(pair)
+                .or_default()
+                .push((found, found.report().score));
+        }
+    }
+    for (index, entry) in baseline.duplication_entries.iter().enumerate() {
+        if policy.severity(Rule::SourceDuplication) != Severity::Error
+            || policy.duplication_minimum.is_none()
+        {
+            eprintln!(
+                "baseline-review: deferred inactive duplication rule for {} and {}",
+                entry.occurrences[0].path, entry.occurrences[1].path
+            );
+            continue;
+        }
+        if !entry
+            .occurrences
+            .iter()
+            .all(|identity| Rule::SourceDuplication.supports(identity.language))
+        {
+            eprintln!(
+                "baseline-review: deferred duplication entry for unsupported language at {} and {}",
+                entry.occurrences[0].path, entry.occurrences[1].path
+            );
+            continue;
+        }
+        if !entry
+            .occurrences
+            .iter()
+            .all(|identity| policy.includes(std::path::Path::new(&identity.path)))
+        {
+            eprintln!(
+                "baseline-review: deferred duplication entry outside policy selection for {} and {}",
+                entry.occurrences[0].path, entry.occurrences[1].path
+            );
+            continue;
+        }
+        {
+            let mut pair = entry.occurrences.clone();
+            pair.sort();
+            if baseline_pair_counts.get(&pair) != Some(&1) {
+                eprintln!(
+                    "baseline-review: deferred duplicate baseline entries for {} and {}",
+                    pair[0].path, pair[1].path
+                );
+                continue;
+            }
+            match found_by_pair.get(&pair).map(Vec::as_slice) {
+                Some([(found, score)])
+                    if *score < entry.score && found.is_part_of(&entry.tokens) =>
+                {
+                    let tokens: Vec<_> = found.tokens().map(str::to_owned).collect();
+                    operations.push(patch_value(
+                        "replace",
+                        format!("/duplication_entries/{index}/score"),
+                        serde_json::json!(tokens.len()),
+                    ));
+                    operations.push(patch_value(
+                        "replace",
+                        format!("/duplication_entries/{index}/tokens"),
+                        serde_json::json!(tokens),
+                    ));
+                }
+                Some([(_, score)]) => eprintln!(
+                    "baseline-review: preserved unchanged, worsened, or rewritten duplication match for {} and {} (score {})",
+                    pair[0].path, pair[1].path, score
+                ),
+                Some(candidates) if candidates.len() > 1 => {
+                    eprintln!(
+                        "baseline-review: deferred ambiguous duplication match for {} and {}",
+                        pair[0].path, pair[1].path
+                    );
+                }
+                Some(_) => {}
+                None if matches.iter().any(|found| {
+                    let anchors = found.anchors();
+                    (anchors.iter().any(|anchor| anchor.is_none())
+                        && found.report().occurrences.iter().any(|occurrence| {
+                            entry
+                                .occurrences
+                                .iter()
+                                .any(|identity| identity.path == occurrence.path)
+                        }))
+                        || anchors
+                            .iter()
+                            .flatten()
+                            .any(|identity| pair.iter().any(|known| known == *identity))
+                }) =>
+                {
+                    eprintln!(
+                        "baseline-review: deferred ambiguous or overlapping duplication match for {} and {}",
+                        pair[0].path, pair[1].path
+                    );
+                }
+                None if entry.occurrences.iter().all(|identity| {
+                    !scope_counts.keys().any(|candidate| {
+                        candidate.path == identity.path
+                            && candidate.scope.starts_with(&identity.scope)
+                    }) || unique(identity, &scope_counts)
+                }) =>
+                {
+                    operations.push(patch_remove(format!("/duplication_entries/{index}")))
+                }
+                None => eprintln!(
+                    "baseline-review: deferred duplication entry with ambiguous identities for {} and {}",
+                    pair[0].path, pair[1].path
+                ),
+            }
+        }
+    }
+    operations.sort_by_key(patch_order);
+    Ok(Some(operations))
+}
+
+fn patch_order(operation: &PatchOperation) -> (usize, std::cmp::Reverse<usize>, u8, String) {
+    let parts: Vec<_> = operation.path.trim_start_matches('/').split('/').collect();
+    let array = if parts[0] == "entries" { 0 } else { 1 };
+    let index = parts[1].parse::<usize>().unwrap_or(0);
+    let field = if operation.op == "remove" {
+        0
+    } else if parts.len() > 2 && parts[2] == "score" {
+        1
+    } else {
+        2
+    };
+    (
+        array,
+        std::cmp::Reverse(index),
+        field,
+        operation.path.clone(),
+    )
+}
+
 fn duplication_matches<'a>(
     policy: &Policy,
     sources: &'a [duplication::Source],
@@ -361,6 +638,18 @@ fn run(command: Command) -> io::Result<u8> {
             match generate(&input, &paths, &mut report) {
                 Ok(Some(baseline)) => {
                     io::stdout().lock().write_all(&baseline)?;
+                    return Ok(0);
+                }
+                Ok(None) => {}
+                Err(diagnostic) => report.diagnostics.push(diagnostic),
+            }
+            write_json(io::stderr().lock(), &report)?;
+            return Ok(2);
+        }
+        Command::BaselineReview { settings } => {
+            match review_baseline(&settings, &mut report) {
+                Ok(Some(patch)) => {
+                    write_json(io::stdout().lock(), &patch)?;
                     return Ok(0);
                 }
                 Ok(None) => {}

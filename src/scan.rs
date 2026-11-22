@@ -185,14 +185,7 @@ fn scan_file(
     ]
     .into_iter()
     .any(|rule| policy.active_for(language, rule));
-    if !active_for_language
-        || !policy.selects(language)
-        || !policy.includes(path)
-        || path
-            .ancestors()
-            .skip(1)
-            .any(|parent| !parent.as_os_str().is_empty() && policy.excludes_directory(parent))
-    {
+    if !active_for_language || !policy.selects(language) || !policy.includes(path) {
         return Ok(None);
     }
     let error = |kind, message| path_error(kind, path, message);
