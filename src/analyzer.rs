@@ -23,6 +23,8 @@ pub fn analyze(
     language: Language,
     source: &str,
     duplication_budget: Option<(usize, usize)>,
+    cyclomatic_enabled: bool,
+    cognitive_enabled: bool,
 ) -> Result<Analysis, Diagnostic> {
     let parser_error =
         |message: &str| Diagnostic::new(ErrorKind::ParseError, Some(path.to_owned()), message);
@@ -37,7 +39,7 @@ pub fn analyze(
     let mut result = Analysis::default();
     let mut duplicate_source = duplication_budget.map(|_| duplication::Source::new(path));
     let mut scope = Vec::<Scope>::new();
-    let cognitive = Rule::CognitiveComplexity.supports(language);
+    let cognitive = cognitive_enabled && Rule::CognitiveComplexity.supports(language);
     let mut active = Vec::<Frame>::new();
     let mut entries = Vec::new();
     let mut cursor = tree.walk();
@@ -68,13 +70,16 @@ pub fn analyze(
             };
             *result.scope_counts.entry(identity.clone()).or_default() += 1;
             if is_callable {
-                active.push(Frame {
-                    cyclomatic_index: result.callables.len(),
-                    cognitive_index: cognitive.then_some(result.callables.len() + 1),
-                    depth: 0,
-                });
+                let base = result.callables.len();
                 let rules = [Rule::CyclomaticComplexity, Rule::CognitiveComplexity];
-                for rule in rules.into_iter().filter(|rule| rule.supports(language)) {
+                for rule in rules.into_iter().filter(|rule| {
+                    rule.supports(language)
+                        && match rule {
+                            Rule::CyclomaticComplexity => cyclomatic_enabled,
+                            Rule::CognitiveComplexity => cognitive,
+                            Rule::SourceDuplication => false,
+                        }
+                }) {
                     result.callables.push(Callable {
                         rule,
                         identity: identity.clone(),
@@ -84,12 +89,19 @@ pub fn analyze(
                         contributions: Vec::new(),
                     });
                 }
+                active.push(Frame {
+                    cyclomatic_index: base + usize::from(!cyclomatic_enabled),
+                    cognitive_index: cognitive.then_some(base + usize::from(cyclomatic_enabled)),
+                    depth: 0,
+                });
             }
         }
         let mut nested = false;
         if let Some(frame) = active.last_mut() {
-            result.callables[frame.cyclomatic_index].score +=
-                u64::from(decision_points(language, node));
+            if cyclomatic_enabled {
+                result.callables[frame.cyclomatic_index].score +=
+                    u64::from(decision_points(language, node));
+            }
             if let Some(index) = frame.cognitive_index {
                 nested = !is_callable && cognitive::enters_nested_flow(node);
                 frame.depth += u32::from(nested);

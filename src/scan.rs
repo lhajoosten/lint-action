@@ -31,12 +31,18 @@ pub fn scan(root: &Path, paths: &[PathBuf], policy: &Policy) -> Scan {
 
     let mut files = BTreeSet::new();
     let mut diagnostics = Vec::new();
+    let active = policy.any_active();
     if paths.is_empty() {
-        discover(&root, &root, policy, &mut files, &mut diagnostics);
+        if active {
+            discover(&root, &root, policy, &mut files, &mut diagnostics);
+        }
     } else {
         for path in paths.iter().collect::<BTreeSet<_>>() {
             match explicit_path(&root, path) {
-                Ok(full_path) => discover(&root, &full_path, policy, &mut files, &mut diagnostics),
+                Ok(full_path) if active => {
+                    discover(&root, &full_path, policy, &mut files, &mut diagnostics);
+                }
+                Ok(_) => {}
                 Err(diagnostic) => diagnostics.push(diagnostic),
             }
         }
@@ -45,8 +51,15 @@ pub fn scan(root: &Path, paths: &[PathBuf], policy: &Policy) -> Scan {
         .sort_by(|left, right| (&left.path, &left.message).cmp(&(&right.path, &right.message)));
     scan.analysis.diagnostics.extend(diagnostics);
 
+    // A deliberately all-pass policy validates the request and selection, then
+    // returns a successful skipped-analysis result without touching source files.
+    if !active {
+        return scan;
+    }
+
     let mut duplication_budget = policy
         .duplication_minimum
+        .filter(|_| policy.active(Rule::SourceDuplication))
         .map(|_| (duplication::MAX_TOKENS, duplication::MAX_TOKEN_BYTES));
     for path in files {
         match scan_file(&root, &path, policy, duplication_budget) {
@@ -165,7 +178,14 @@ fn scan_file(
     let Some(language) = Language::from_path(path) else {
         return Ok(None);
     };
-    if !policy.selects(language) || !policy.includes(path) {
+    let active_for_language = [
+        Rule::CyclomaticComplexity,
+        Rule::CognitiveComplexity,
+        Rule::SourceDuplication,
+    ]
+    .into_iter()
+    .any(|rule| policy.active_for(language, rule));
+    if !active_for_language || !policy.selects(language) || !policy.includes(path) {
         return Ok(None);
     }
     let error = |kind, message| path_error(kind, path, message);
@@ -196,8 +216,17 @@ fn scan_file(
         })?;
     let source = std::str::from_utf8(&bytes)
         .map_err(|io| error(ErrorKind::InvalidEncoding, io.to_string()))?;
-    let budget = duplication_budget.filter(|_| Rule::SourceDuplication.supports(language));
-    analyze(&path, language, source, budget).map(Some)
+    let budget =
+        duplication_budget.filter(|_| policy.active_for(language, Rule::SourceDuplication));
+    analyze(
+        &path,
+        language,
+        source,
+        budget,
+        policy.active_for(language, Rule::CyclomaticComplexity),
+        policy.active_for(language, Rule::CognitiveComplexity),
+    )
+    .map(Some)
 }
 
 fn path_error(kind: ErrorKind, path: &Path, message: impl Into<String>) -> Diagnostic {

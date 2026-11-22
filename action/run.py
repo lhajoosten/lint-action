@@ -125,6 +125,8 @@ def render(report, code, relative_repository):
     diagnostics = report["diagnostics"]
     totals = {status: sum(item["status"] == status for item in findings)
               for status in ("reported", "baselined", "blocking")}
+    severities = {level: sum(item.get("severity", "error") == level for item in findings)
+                  for level in ("warn", "error")}
     messages = []
     for item in diagnostics:
         path = item.get("path")
@@ -138,14 +140,15 @@ def render(report, code, relative_repository):
             if item["status"] != status:
                 continue
             rule = item["rule"]
+            severity = item.get("severity", "error")
             if rule == "source-duplication":
                 primary, secondary = item["occurrences"]
-                message = (f'{rule}: {item["score"]} shared tokens (minimum {item["limit"]}, {status}) '
+                message = (f'{severity} {rule}: {item["score"]} shared tokens (minimum {item["limit"]}, {status}) '
                            f'at {format_occurrence(primary)} and {format_occurrence(secondary)}')
             else:
                 primary = item
                 rule = rule.replace("-", " ")
-                message = (f'{item["name"]} has {rule} {item["score"]} '
+                message = (f'{item["name"]} has {severity} {rule} {item["score"]} '
                            f'(limit {item["limit"]}, {status})')
                 contributions = sorted(item.get("contributions", []), key=lambda part: -part["points"])
                 if contributions:
@@ -167,6 +170,7 @@ def render(report, code, relative_repository):
         f"Files scanned: {report['files_scanned']} · Files skipped: {report['files_skipped']}",
         f"Analysis errors: {len(diagnostics)} · Reported: {totals['reported']} · "
         f"Baselined: {totals['baselined']} · Blocking: {totals['blocking']}",
+        f"Warning severity: {severities['warn']} · Error severity: {severities['error']}",
     ]
     if messages:
         summary.append("")

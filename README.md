@@ -25,6 +25,16 @@ Create `.lint-action.json` at the source root. This example reports findings wit
 
 Both complexity rules default to a limit of **12**. Omitting `limits` enables cyclomatic complexity in all supported languages. If supplied, `limits` selects the enabled languages and gives their cyclomatic limits. Cognitive complexity runs for enabled TypeScript and TSX. Set `cognitive_limits` to override either cognitive limit independently.
 
+Set `severities` to override enforcement per stable rule ID. `pass` disables the rule, `warn` reports findings without blocking or using baseline exceptions, and `error` follows the configured mode. Missing entries retain the existing mode behavior, and severity does not enable a rule that is otherwise inactive.
+
+```json
+{
+  "mode": "strict",
+  "limits": {"typescript": 10},
+  "severities": {"cyclomatic-complexity": "error", "cognitive-complexity": "warn"}
+}
+```
+
 ```json
 {
   "mode": "report-only",
@@ -49,6 +59,8 @@ Use `--config /path/to/policy.json` to select another policy. To scan specific f
 
 Generate a baseline explicitly after reviewing the report. A successful generation writes JSON to stdout. Keep the checked-in baseline intact if generation fails.
 
+Baseline generation records new exceptions for error rules, including in report-only mode. It carries forward existing exceptions for rules set to `warn` or `pass` from the baseline beside the policy file.
+
 ```sh
 lint-gate baseline > .lint-action-baseline.json.new &&
   mv .lint-action-baseline.json.new .lint-action-baseline.json
@@ -56,7 +68,7 @@ lint-gate baseline > .lint-action-baseline.json.new &&
 
 Set `mode` to `baseline` and check the policy and baseline into the base branch. The CLI reads `.lint-action-baseline.json` beside the policy unless you pass `--baseline`. A complexity baseline entry records the rule ID, path, language, and qualified callable identity without line numbers. Entries from earlier versions that omit the rule ID apply to cyclomatic complexity. Moving to another path or named scope, changing the callable identity, or introducing ambiguous names prevents a waiver. A directly returned callable uses a return-site identity within its enclosing scope. Other unbound anonymous callables are reported and cannot inherit waivers. Only unique, over-limit callables with stable identities are included when generating a baseline. Remove stale entries during deliberate baseline review.
 
-After an accepted finding improves, preview safe reductions with `lint-gate baseline-review --root /path/to/project`. It requires the existing baseline and a complete successful scan under the selected policy. The command writes a deterministic RFC 6902 JSON Patch to stdout, leaves the baseline file untouched, and explains preserved entries on stderr. An empty array (`[]`) means there are no safe changes. Review and apply the patch explicitly before committing the baseline; new, worsened, inactive, excluded, or ambiguous exceptions are preserved.
+After an accepted finding improves, preview safe reductions with `lint-gate baseline-review --root /path/to/project`. It requires the existing baseline and a complete successful scan under the selected policy. The command writes a deterministic RFC 6902 JSON Patch to stdout, leaves the baseline file untouched, and explains preserved entries on stderr. An empty array (`[]`) means there are no safe changes. Review and apply the patch explicitly before committing the baseline. The command preserves new, worsened, inactive, excluded, or ambiguous exceptions, along with exceptions for rules set to `warn` or `pass`.
 
 Use `lint-gate validate --root /path/to/project` to check candidate policy and its baseline separately from enforcement.
 
@@ -110,7 +122,7 @@ To reproduce PR results, materialize the base policy and its baseline in a tempo
 
 ## Report contract
 
-`scan` writes JSON with `format_version`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. All findings include a stable rule ID, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by the first occurrence's path and start position, then by rule. Complexity findings retain the source path, language, callable name, scope, and range. Cognitive findings include the scoring contributions. Duplication findings carry two locations in `occurrences`, and `limit` is an inclusive minimum. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, empty scans, and the duplication analysis budget.
+`scan` writes JSON with `format_version: 2`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. All findings include a stable rule ID, severity, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by the first occurrence's path and start position, then by rule. Complexity findings retain the source path, language, callable name, scope, and range. Cognitive findings include the scoring contributions. Duplication findings carry two locations in `occurrences`, and `limit` is an inclusive minimum. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, empty scans, and the duplication analysis budget.
 
 | Exit | Meaning |
 | --- | --- |
