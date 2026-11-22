@@ -49,6 +49,149 @@ class CliTests(unittest.TestCase):
     def duplication(self, mode="report-only", minimum=10, **options):
         self.config(mode, limits={}, duplication={"minimum_tokens": minimum}, **options)
 
+    def test_compare_complexity_scores_and_identities(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            policy = {"mode": "baseline", "limits": {"python": 2}}
+            (base / POLICY).write_text(json.dumps(policy))
+
+            def callable_source(name, score):
+                return f"def {name}(x):\n" + "    if x: x -= 1\n" * (score - 1) + "    return x\n"
+
+            scores = {"crossed": (2, 3), "worse": (3, 4), "better": (4, 3),
+                      "fixed": (3, 2), "steady": (3, 3), "passing": (1, 2)}
+            before = {f"{name}.py": callable_source(name, pair[0])
+                      for name, pair in scores.items()}
+            after = {f"{name}.py": "\n\n" + callable_source(name, pair[1])
+                     for name, pair in scores.items()}
+            before["deleted.py"] = callable_source("deleted", 3)
+            before["old.py"] = after["renamed.py"] = callable_source("moved", 3)
+            before["ambiguous.py"] = callable_source("ambiguous", 4)
+            after["ambiguous.py"] = callable_source("ambiguous", 3) + callable_source("ambiguous", 1)
+            after["fresh.py"] = callable_source("fresh", 3)
+            for name, content in before.items():
+                (base / name).write_text(content)
+            (base / BASELINE).write_bytes(subprocess.check_output([BIN, "baseline", "--root", base]))
+            for name, content in reversed(list(after.items())):
+                self.write(name, content)
+
+            # Neither the candidate policy nor its own baseline can waive the regression.
+            self.config("report-only", {"python": 999})
+            self.write(BASELINE, "invalid")
+            report, raw = self.invoke(1, "compare", "--base-root", base,
+                                      "--base-revision", "base", "--candidate-revision", "candidate")
+            delta = report.pop("comparison")
+            scan, _ = self.invoke(1, "scan", "--config", base / POLICY)
+            self.assertEqual(report, scan)
+            self.assertEqual((delta["format_version"], delta["status"], delta["unchanged"]),
+                             (1, "complete", 1))
+            self.assertEqual((delta["base_revision"], delta["candidate_revision"]), ("base", "candidate"))
+
+            def change_row(change):
+                before, after = (change[side] for side in ("previous", "current"))
+                return (change["category"], (after or before)["path"], change["match_status"],
+                        before and before["score"], after and after["score"])
+            self.assertEqual([change_row(change) for change in delta["changes"]], [
+                ("new", "crossed.py", "matched", 2, 3),
+                ("new", "fresh.py", "unmatched", None, 3),
+                ("new", "renamed.py", "unmatched", None, 3),
+                ("new", "ambiguous.py", "ambiguous", None, 3),
+                ("worsened", "worse.py", "matched", 3, 4),
+                ("improved", "better.py", "matched", 4, 3),
+                ("fixed", "fixed.py", "matched", 3, 2),
+                ("removed", "deleted.py", "unmatched", 3, None),
+                ("removed", "old.py", "unmatched", 3, None),
+                ("removed", "ambiguous.py", "ambiguous", 4, None),
+            ])
+            crossing = delta["changes"][0]
+            self.assertEqual((crossing["limit"], crossing["previous"]["status"], crossing["current"]["status"]),
+                             (2, None, "blocking"))
+            self.assertEqual(crossing["current"]["range"]["start"]["line"], 3)
+            fixed = delta["changes"][6]
+            self.assertEqual((fixed["previous"]["status"], fixed["current"]["status"]), ("baselined", None))
+
+            for name in after:
+                (self.root / name).unlink()
+            for name, content in after.items():
+                self.write(name, content)
+            self.assertEqual(self.invoke(1, "compare", "--base-root", base,
+                                         "--base-revision", "base", "--candidate-revision", "candidate")[1],
+                             raw)
+
+    def test_compare_workspace_duplication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / POLICY).write_text(json.dumps(
+                {"mode": "strict", "limits": {}, "duplication": {"minimum_tokens": 10}}
+            ))
+            long = "prepare(item); send(item); cleanup(item);"
+            short = "send(item); cleanup(item);"
+
+            def source(name, statements):
+                return f"function {name}() {{ {statements} }}"
+
+            (base / "a.ts").write_text(source("first", long))
+            self.write("a.ts", source("first", long))
+            for previous, current, category, shares in (
+                (long, short, "improved", (15, 10)),
+                (short, long, "worsened", (10, 15)),
+            ):
+                with self.subTest(category=category):
+                    (base / "b.ts").write_text(source("second", previous))
+                    self.write("b.ts", source("second", current))
+                    report, _ = self.invoke(1, "compare", "--base-root", base)
+                    change, = report["comparison"]["changes"]
+                    self.assertEqual((change["category"], change["match_status"], change["limit"]),
+                                     (category, "matched", 10))
+                    for side, score in zip(("previous", "current"), shares):
+                        self.assertEqual(change[side]["score"], score)
+                        self.assertEqual([item["path"] for item in change[side]["occurrences"]],
+                                         ["a.ts", "b.ts"])
+
+            (base / "b.ts").write_text(source("second", long))
+            self.write("b.ts", "\n" + source("second", long))
+            self.write("c.ts", source("third", long))
+            report, _ = self.invoke(1, "compare", "--base-root", base)
+            delta = report["comparison"]
+            self.assertEqual(delta["unchanged"], 1)
+            self.assertEqual([change["category"] for change in delta["changes"]], ["new", "new"])
+            self.assertEqual([[part["path"] for part in change["current"]["occurrences"]]
+                              for change in delta["changes"]], [["a.ts", "c.ts"], ["b.ts", "c.ts"]])
+
+            (self.root / "c.ts").unlink()
+            for filename, name in (("a.ts", "first"), ("b.ts", "second")):
+                self.write(filename, source(name, long.replace("item", "other")))
+            report, _ = self.invoke(1, "compare", "--base-root", base)
+            self.assertEqual([(change["category"], change["match_status"])
+                              for change in report["comparison"]["changes"]],
+                             [("new", "unmatched"), ("removed", "unmatched")])
+
+    def test_compare_unavailable_preserves_candidate_result(self):
+        self.config("strict", {"python": 1})
+        self.write("candidate.py", "def f(x): return 1 if x else 0")
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            trusted = ("--config", self.root / POLICY)
+            report, _ = self.invoke(1, "compare", *trusted)
+            self.assertEqual(report["comparison"]["reason"], "base_root_unavailable")
+            self.assertNotIn("unchanged", report["comparison"])
+            self.assertEqual(len(report["findings"]), 1)
+
+            for root, kind in ((base / "missing", "invalid_path"), (base, "parse_error")):
+                (base / "broken.py").write_text("def broken(:\n")
+                report, _ = self.invoke(1, "compare", *trusted, "--base-root", root)
+                delta = report["comparison"]
+                self.assertEqual((delta["status"], delta["reason"], delta["changes"]),
+                                 ("unavailable", "base_analysis_failed", []))
+                self.assertEqual(delta["base_diagnostics"][0]["kind"], kind)
+                self.assertEqual(report["diagnostics"], [])
+
+            self.write("candidate.py", "def broken(:\n")
+            (base / "broken.py").write_text("def passing(): pass")
+            report, _ = self.invoke(2, "compare", *trusted, "--base-root", base)
+            self.assertEqual(report["comparison"]["reason"], "candidate_analysis_failed")
+            self.assertEqual(report["diagnostics"][0]["kind"], "parse_error")
+
     def test_source_duplication_locations_selection_and_threshold(self):
         self.duplication(exclude=["vendor/**"])
         self.write("old.ts", "function old() {\n  const café = 0; prepare(item); send(item);\n}\n")
