@@ -1,6 +1,16 @@
 # Changelog
 
-<!-- release-log:pending:v1 sha256:59f3a303f020357c87943804f0742ef09d6b4dfaa2181f721d52e66eb7169a5f -->
+<!-- release-log:pending:v1 sha256:62e6a04c819cc7ae795011be4b388124f6df6f4b358ea5d2b73abef9f14c1341 -->
+
+## v0.1.1 (2026-11-22)
+
+### 👷 Continuous integration
+
+- Apply Rolling Release v2 to future releases while preserving exact verification of the existing release history&#46; ([#20](https://github.com/lhajoosten/lint-gate/pull/20)) by [&#64;lhajoosten](https://github.com/lhajoosten)
+
+Full changelog: [v0&#46;1&#46;0&#8230;e675f6bc6a6187e7851e5c77bad8b0a080e065d2](https://github.com/lhajoosten/lint-gate/compare/v0.1.0...e675f6bc6a6187e7851e5c77bad8b0a080e065d2) (captured source).
+
+<!-- release-log:pending:end -->
 
 ## v0.1.0 (2026-11-22)
 
@@ -34,4 +44,3 @@ Initial release of the captured repository state.
 
 </details>
 
-<!-- release-log:pending:end -->
