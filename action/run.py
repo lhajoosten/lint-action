@@ -195,6 +195,7 @@ def main(binary):
             output.write(result.stdout)
         append_env_file("GITHUB_OUTPUT", f"report={output.name}\n")
         render(report, result.returncode, repository.relative_to(workspace))
+        append_env_file("GITHUB_OUTPUT", f"outcome={result.returncode}\n")
         return result.returncode
     except (OSError, KeyError, ValueError) as error:
         annotation("error", str(error))
