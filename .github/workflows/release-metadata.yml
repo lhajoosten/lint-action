@@ -15,6 +15,12 @@ concurrency:
 
 jobs:
   release-log:
+    # The pinned provider verifies its own release proposal record and generated body.
+    if: >-
+      github.event.pull_request.head.ref != 'release/next' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      vars.ROLLING_RELEASE_BOT == '' ||
+      github.event.pull_request.user.login != vars.ROLLING_RELEASE_BOT
     uses: lhajoosten/rolling-release/.github/workflows/release-metadata.yml@f74198ff778b132dddc5a6440f230fd6b5be8ce8
     with:
       tool-sha: f74198ff778b132dddc5a6440f230fd6b5be8ce8
