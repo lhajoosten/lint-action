@@ -632,6 +632,7 @@ fn print_result(result: Result<String>, permission: &str) -> u8 {
                 Error::Network => {
                     eprintln!("GitHub could not be reached. Rerun the publisher to retry.")
                 }
+                Error::Diagnostic(message) => eprintln!("{message}"),
                 _ => eprintln!(
                     "Unexpected GitHub metadata or publishing configuration. Verify the publisher inputs."
                 ),
