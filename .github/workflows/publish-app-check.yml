@@ -11,6 +11,10 @@ on:
         description: Independently rescan and publish PR review conversations
         type: boolean
         default: false
+      allow-contents-write-for-resolution:
+        description: Request Contents write on the repository-scoped conversation token to resolve and reopen review threads
+        type: boolean
+        default: false
       app-id:
         description: Numeric GitHub App ID
         type: string
@@ -239,9 +243,16 @@ jobs:
           app-id: ${{ inputs.app-id }}
           private-key: ${{ secrets.app-private-key }}
           permission-pull-requests: write
+          permission-contents: ${{ inputs.allow-contents-write-for-resolution && 'write' || '' }}
       - name: Explain installation failures
         if: failure() && steps.installation.outcome == 'failure'
-        run: echo '::error::Verify the App ID and private key match and the App is installed with Pull requests write permission.'
+        env:
+          REQUEST_CONTENTS_WRITE: ${{ inputs.allow-contents-write-for-resolution }}
+        run: |
+          echo '::error::Verify the App ID, private key, and installation grant for Pull requests write.'
+          if [[ "$REQUEST_CONTENTS_WRITE" == 'true' ]]; then
+            echo '::error::Thread resolution also requested Contents write. Verify the installation owner approved that grant, or disable allow-contents-write-for-resolution.'
+          fi
       - name: Publish PR conversations
         env:
           GITHUB_TOKEN: ${{ github.token }}

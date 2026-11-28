@@ -34,6 +34,9 @@ struct State {
     thread_updates: usize,
     stop_after_reservation: bool,
     forbid_threads: bool,
+    forbid_mutation: bool,
+    can_resolve: bool,
+    can_reopen: bool,
     reject_review: bool,
 }
 
@@ -65,6 +68,9 @@ impl State {
             thread_updates: 0,
             stop_after_reservation: false,
             forbid_threads: false,
+            forbid_mutation: false,
+            can_resolve: true,
+            can_reopen: true,
             reject_review: false,
         }
     }
@@ -77,7 +83,7 @@ impl State {
         mut payload: Value,
     ) -> (u16, Value, Option<&'static str>) {
         if path == "/users/lint-gate%5Bbot%5D" {
-            assert_eq!((method, token), ("GET", "Bearer read-token"));
+            assert_eq!((method, token), ("GET", "Bearer app-token"));
             return (
                 200,
                 json!({"login": "lint-gate[bot]", "id": 77, "type": "Bot"}),
@@ -95,6 +101,13 @@ impl State {
             }
             let query = payload["query"].as_str().unwrap();
             let data = if query.contains("mutation") {
+                if self.forbid_mutation {
+                    return (
+                        200,
+                        json!({"errors": [{"extensions": {"type": "FORBIDDEN"}}]}),
+                        None,
+                    );
+                }
                 let id = payload["variables"]["id"]
                     .as_str()
                     .unwrap()
@@ -107,7 +120,12 @@ impl State {
                     .unwrap();
                 review["resolved"] = json!(!query.contains("unresolveReviewThread"));
                 self.thread_updates += 1;
-                json!({})
+                let operation = if query.contains("unresolveReviewThread") {
+                    "unresolveReviewThread"
+                } else {
+                    "resolveReviewThread"
+                };
+                json!({operation: {"thread": {"id": id.to_string(), "isResolved": review["resolved"]}}})
             } else {
                 let nodes: Vec<_> = self
                     .reviews
@@ -115,6 +133,7 @@ impl State {
                     .map(|review| {
                         json!({
                             "id": review["id"].to_string(), "isResolved": review["resolved"],
+                            "viewerCanResolve": self.can_resolve, "viewerCanUnresolve": self.can_reopen,
                             "comments": {"nodes": [{"databaseId": review["id"]}]}
                         })
                     })
@@ -752,7 +771,124 @@ fn conversation_rechecks_pr_before_writes_and_rejects_older_feedback() {
     let result = fixture.publish(2, &blocker, true, &["flow.ts"], |_| {});
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stderr).contains("Pull requests write"));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("thread query failed"));
     assert!(fixture.mock.state.lock().unwrap().reviews.is_empty());
+}
+
+#[test]
+fn thread_capabilities_and_mutation_failures_identify_the_writer_and_thread() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    let blocker = [finding("flow", 2, "blocking")];
+    fixture.deliver(&blocker, &["flow.ts"]);
+    fixture.blocking(false);
+    fixture.mock.state.lock().unwrap().can_resolve = false;
+    let denied = fixture.publish(2, &[], true, &["flow.ts"], |_| {});
+    assert!(denied.status.success());
+    let output = String::from_utf8_lossy(&denied.stdout);
+    assert!(output.contains("lint-gate[bot] (bot ID 77"));
+    assert!(output.contains("viewerCanResolve=false"));
+    assert!(
+        fixture.mock.state.lock().unwrap().issue["body"]
+            .as_str()
+            .unwrap()
+            .contains("#discussion_r1000")
+    );
+    assert_eq!(fixture.mock.state.lock().unwrap().thread_updates, 0);
+    {
+        let mut state = fixture.mock.state.lock().unwrap();
+        state.can_resolve = true;
+        state.forbid_mutation = true;
+    }
+    let failed = fixture.publish(2, &[], true, &["flow.ts"], |_| {});
+    assert!(failed.status.success());
+    assert!(
+        fixture.mock.state.lock().unwrap().issue["body"]
+            .as_str()
+            .unwrap()
+            .contains("#discussion_r1000")
+    );
+    fixture.mock.state.lock().unwrap().forbid_mutation = false;
+    fixture.deliver(&[], &["flow.ts"]);
+    fixture.blocking(true);
+    fixture.mock.state.lock().unwrap().can_reopen = false;
+    let denied = fixture.publish(2, &blocker, true, &["flow.ts"], |_| {});
+    assert!(!denied.status.success());
+    assert!(String::from_utf8_lossy(&denied.stderr).contains("reopen denied for thread"));
+    {
+        let mut state = fixture.mock.state.lock().unwrap();
+        state.can_reopen = true;
+        state.forbid_mutation = true;
+    }
+    let failed = fixture.publish(2, &blocker, true, &["flow.ts"], |_| {});
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("reopen mutation for thread"));
+    fixture.mock.state.lock().unwrap().forbid_mutation = false;
+    fixture.deliver(&blocker, &["flow.ts"]);
+    let updates = fixture.mock.state.lock().unwrap().thread_updates;
+    fixture.deliver(&blocker, &["flow.ts"]);
+    assert_eq!(fixture.mock.state.lock().unwrap().thread_updates, updates);
+}
+
+#[test]
+fn all_denied_obsolete_threads_are_reported_and_other_findings_continue() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    let initial: Vec<_> = (0..18)
+        .map(|i| finding(&format!("old{i}"), 2, "blocking"))
+        .collect();
+    fixture.deliver(&initial, &["flow.ts"]);
+    {
+        let mut state = fixture.mock.state.lock().unwrap();
+        state.can_resolve = false;
+        state.reviews.push(json!({"id": 900, "body": "<!-- lint-gate-finding:dead -->", "resolved":false,"user":{"type":"User","id":90,"login":"human"}}));
+    }
+    let current = [finding("new", 3, "blocking")];
+    fixture.deliver(&current, &["flow.ts"]);
+    let state = fixture.mock.state.lock().unwrap();
+    let summary = state.issue["body"].as_str().unwrap();
+    assert!(summary.contains("18 obsolete review thread(s)"));
+    for id in 1000..1018 {
+        assert!(summary.contains(&format!("#discussion_r{id}")));
+    }
+    assert!(!summary.contains("#discussion_r900"));
+    assert_eq!(state.reviews.len(), 20);
+    assert_eq!(state.reviews[18]["resolved"], false);
+    let prior = summary.to_owned();
+    drop(state);
+    fixture.deliver(&current, &["flow.ts"]);
+    let state = fixture.mock.state.lock().unwrap();
+    assert_eq!(state.issue["body"], prior);
+    assert_eq!(state.reviews.len(), 20);
+}
+
+#[test]
+fn moved_blocker_stays_visible_until_the_old_thread_is_resolved() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    fixture.deliver(&[finding("flow", 2, "blocking")], &["flow.ts"]);
+    fixture.mock.state.lock().unwrap().can_resolve = false;
+    let moved = [finding("flow", 3, "blocking")];
+    fixture.deliver(&moved, &["flow.ts"]);
+    fixture.deliver(&moved, &["flow.ts"]);
+    {
+        let mut state = fixture.mock.state.lock().unwrap();
+        let summary = state.issue["body"].as_str().unwrap();
+        assert!(summary.contains("Blocking error (resolve obsolete thread to update)"));
+        assert!(summary.contains("#discussion_r1000"));
+        assert_eq!(state.reviews.len(), 1);
+        state.reviews[0]["resolved"] = json!(true);
+    }
+    fixture.deliver(&moved, &["flow.ts"]);
+    let state = fixture.mock.state.lock().unwrap();
+    assert_eq!(state.reviews.len(), 2);
+    assert_eq!(state.reviews[1]["line"], 3);
+    assert!(
+        !state.issue["body"]
+            .as_str()
+            .unwrap()
+            .contains("manual resolution")
+    );
 }
 
 #[test]
