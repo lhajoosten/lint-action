@@ -16,3 +16,5 @@ fn selected(value: u8) -> bool {
         _ => false,
     }
 }
+
+fn incomplete(
