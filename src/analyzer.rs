@@ -1,5 +1,5 @@
 use crate::grammar::{Decision, Language, Scope};
-use crate::model::{Callable, Diagnostic, ErrorKind, FinallyExit, Identity, Rule};
+use crate::model::{Callable, Diagnostic, EmptyHandler, ErrorKind, FinallyExit, Identity, Rule};
 use crate::{cognitive, duplication};
 use std::collections::BTreeMap;
 use tree_sitter::{Node, Parser};
@@ -8,6 +8,7 @@ use tree_sitter::{Node, Parser};
 pub struct Analysis {
     pub callables: Vec<Callable>,
     pub finally_exits: Vec<FinallyExit>,
+    pub empty_handlers: Vec<EmptyHandler>,
     pub diagnostics: Vec<Diagnostic>,
     pub scope_counts: BTreeMap<Identity, usize>,
     pub duplication: Vec<duplication::Source>,
@@ -27,6 +28,7 @@ pub fn analyze(
     cyclomatic_enabled: bool,
     cognitive_enabled: bool,
     finally_enabled: bool,
+    empty_handler_enabled: bool,
 ) -> Result<Analysis, Diagnostic> {
     let parser_error =
         |message: &str| Diagnostic::new(ErrorKind::ParseError, Some(path.to_owned()), message);
@@ -94,6 +96,15 @@ pub fn analyze(
                 &ancestors,
             );
         }
+        collect_empty_handler(
+            &mut result.empty_handlers,
+            path,
+            language,
+            node,
+            source,
+            &scope,
+            empty_handler_enabled,
+        );
         let mut nested = false;
         if let Some(frame) = active.last_mut() {
             if cyclomatic_enabled {
@@ -154,6 +165,7 @@ pub fn analyze(
                 {
                     result.callables.clear();
                     result.finally_exits.clear();
+                    result.empty_handlers.clear();
                     result.scope_counts.clear();
                 } else {
                     result.duplication.extend(duplicate_source);
@@ -193,7 +205,7 @@ fn register_callable(
         .filter(|rule| match rule {
             Rule::CyclomaticComplexity => cyclomatic,
             Rule::CognitiveComplexity => cognitive,
-            Rule::SourceDuplication | Rule::FinallyExit => false,
+            Rule::SourceDuplication | Rule::FinallyExit | Rule::EmptyHandler => false,
         })
     {
         callables.push(Callable {
@@ -229,6 +241,37 @@ fn collect_finally(
             range: crate::finally::transfer_range(language, node, source),
             transfer: node.kind().trim_end_matches("_statement").to_owned(),
             message: "Control flow leaving finally can suppress an exception or override an earlier return.",
+        });
+    }
+}
+
+fn collect_empty_handler(
+    handlers: &mut Vec<EmptyHandler>,
+    path: &str,
+    language: Language,
+    node: Node<'_>,
+    source: &str,
+    scope: &[Scope],
+    enabled: bool,
+) {
+    if let Some((cause, body_shape)) = enabled
+        .then(|| crate::empty_handler::detect(language, node, source))
+        .flatten()
+    {
+        handlers.push(EmptyHandler {
+            rule: Rule::EmptyHandler,
+            identity: Identity {
+                path: path.to_owned(),
+                language,
+                scope: scope.to_vec(),
+            },
+            name: scope
+                .last()
+                .map_or_else(|| "<module>".to_owned(), |part| part.name.clone()),
+            range: node.range().into(),
+            cause,
+            body_shape,
+            message: "This handler silently discards an exception.",
         });
     }
 }

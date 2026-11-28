@@ -2,6 +2,7 @@ mod analyzer;
 mod cognitive;
 mod comparison;
 mod duplication;
+mod empty_handler;
 mod finally;
 mod github;
 mod grammar;
@@ -13,7 +14,8 @@ use crate::analyzer::Analysis;
 use crate::duplication::{Duplication, Match, Pair};
 use crate::grammar::ANONYMOUS;
 use crate::model::{
-    Callable, Diagnostic, ErrorKind, FinallyExit, Identity, Position, Rule, SCORING_VERSION,
+    Callable, Diagnostic, EmptyHandler, ErrorKind, FinallyExit, Identity, Position, Rule,
+    SCORING_VERSION,
 };
 use crate::policy::{BASELINE_FILE, Baseline, BaselineScores, CONFIG_FILE, Mode, Policy, Severity};
 use clap::{Args, Parser, Subcommand};
@@ -166,6 +168,7 @@ enum Detail {
     Complexity(Callable),
     Duplication(Duplication),
     FinallyExit(FinallyExit),
+    EmptyHandler(EmptyHandler),
 }
 
 impl Detail {
@@ -173,6 +176,7 @@ impl Detail {
         let (path, Position { line, column }, rule) = match self {
             Self::Complexity(item) => (&item.identity.path, item.range.start, item.rule),
             Self::FinallyExit(item) => (&item.identity.path, item.range.start, item.rule),
+            Self::EmptyHandler(item) => (&item.identity.path, item.range.start, item.rule),
             Self::Duplication(item) => (
                 &item.occurrences[0].path,
                 item.occurrences[0].range.start,
@@ -222,7 +226,7 @@ impl Report {
 
     fn set_policy(&mut self, policy: &Policy) {
         self.mode = Some(policy.mode);
-        if policy.finally_exit {
+        if policy.finally_exit || policy.empty_handler {
             self.format_version = 3;
         }
     }
@@ -278,6 +282,7 @@ fn scan(
 
 struct ScoredTree<'a> {
     finally_exits: Vec<FinallyExit>,
+    empty_handlers: Vec<EmptyHandler>,
     callables: Vec<Callable>,
     scope_counts: &'a BTreeMap<Identity, usize>,
     matches: Vec<Match<'a>>,
@@ -294,6 +299,7 @@ impl<'a> ScoredTree<'a> {
         report.diagnostics = std::mem::take(&mut analysis.diagnostics);
         Self {
             finally_exits: std::mem::take(&mut analysis.finally_exits),
+            empty_handlers: std::mem::take(&mut analysis.empty_handlers),
             callables: std::mem::take(&mut analysis.callables),
             scope_counts: &analysis.scope_counts,
             matches,
@@ -341,6 +347,15 @@ impl<'a> ScoredTree<'a> {
                 severity,
                 status: finally_exit_status(policy),
             }));
+        let severity = policy.severity(Rule::EmptyHandler);
+        report
+            .findings
+            .extend(self.empty_handlers.into_iter().map(|item| Finding {
+                detail: Detail::EmptyHandler(item),
+                limit: None,
+                severity,
+                status: unscored_status(policy, Rule::EmptyHandler),
+            }));
         report
             .findings
             .sort_by(|left, right| left.detail.location().cmp(&right.detail.location()));
@@ -348,7 +363,11 @@ impl<'a> ScoredTree<'a> {
 }
 
 fn finally_exit_status(policy: &Policy) -> Status {
-    if policy.severity(Rule::FinallyExit) == Severity::Warn {
+    unscored_status(policy, Rule::FinallyExit)
+}
+
+fn unscored_status(policy: &Policy, rule: Rule) -> Status {
+    if policy.severity(rule) == Severity::Warn {
         Status::Reported
     } else {
         Status::for_mode(policy.mode, false)

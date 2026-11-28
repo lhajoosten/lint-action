@@ -69,7 +69,7 @@
         {
           "kind": "invalid_config",
           "path": "$TREE0/.lint-action.json",
-          "message": "unknown variant `unknown-rule`, expected one of `cyclomatic-complexity`, `cognitive-complexity`, `source-duplication`, `finally-exit` at line 1 column 77"
+          "message": "unknown variant `unknown-rule`, expected one of `cyclomatic-complexity`, `cognitive-complexity`, `source-duplication`, `finally-exit`, `empty-handler` at line 1 column 77"
         }
       ]
     },

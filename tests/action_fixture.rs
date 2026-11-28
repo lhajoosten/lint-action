@@ -457,6 +457,55 @@ mod unix {
         }
     }
 
+    fn empty_handler_annotations() {
+        let fixture = Fixture::new();
+        let repo = fixture.workspace.join("action-fixture-pass");
+        fs::write(
+            repo.join("simple.py"),
+            "try: run()\nexcept Exception: pass\n",
+        )
+        .unwrap();
+        for (severity, code) in [("warn", 0), ("error", 1)] {
+            let policy = json!({"mode":"strict", "limits":{}, "empty_handler":true, "severities":{"empty-handler":severity}});
+            fs::write(repo.join(CONFIG), policy.to_string()).unwrap();
+            let revision = commit(&repo, "Enable empty-handler");
+            let (annotation, _, path) = fixture.run(
+                fixture
+                    .command(&fixture.workspace, "action-fixture-pass")
+                    .env("LINT_GATE_PR_BASE", revision),
+                code,
+            );
+            let action = read(&path.unwrap());
+            let cli = common::command(&fixture.tools)
+                .args(["scan", "--root"])
+                .arg(&repo)
+                .output()
+                .unwrap();
+            assert_eq!(cli.status.code(), Some(code));
+            let local: Value = serde_json::from_slice(&cli.stdout).unwrap();
+            assert_eq!(action["findings"], local["findings"]);
+            let f = &action["findings"][0];
+            assert_eq!(f["rule"], "empty-handler");
+            assert_eq!(f["body_shape"], "pass");
+            assert_eq!(f["range"]["start"], json!({"line":2,"column":1}));
+            let level = if severity == "warn" {
+                "warning"
+            } else {
+                "error"
+            };
+            assert!(annotation.contains(&format!("::{level} title=lint-gate quality gate,file=action-fixture-pass/simple.py,line=2,col=1::")), "{annotation}");
+            let mut invalid = action.clone();
+            invalid["findings"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("body_shape");
+            assert_normalization_rejected(&fixture, &invalid);
+            invalid = action.clone();
+            invalid["findings"][0]["score"] = json!(null);
+            assert_normalization_rejected(&fixture, &invalid);
+        }
+    }
+
     fn assert_normalization_rejected(fixture: &Fixture, report: &Value) {
         let path = fixture.path("invalid-report.json");
         fs::write(&path, report.to_string()).unwrap();
@@ -674,6 +723,7 @@ mod unix {
             [] => {
                 trusted_policy_and_output();
                 finally_exit_annotations();
+                empty_handler_annotations();
                 exact_event_base_and_synthetic_merge();
                 stage_verified_scan_evidence();
             }

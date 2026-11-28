@@ -44,6 +44,8 @@ struct Config {
     duplication: Option<DuplicationConfig>,
     #[serde(default)]
     finally_exit: bool,
+    #[serde(default)]
+    empty_handler: bool,
     #[serde(default = "all_paths")]
     include: Vec<String>,
     #[serde(default)]
@@ -66,6 +68,7 @@ pub struct Policy {
     severities: BTreeMap<Rule, Severity>,
     pub duplication_minimum: Option<u32>,
     pub finally_exit: bool,
+    pub empty_handler: bool,
     limits: BTreeMap<Language, u32>,
     cognitive_limits: BTreeMap<Language, u32>,
     include: GlobSet,
@@ -83,6 +86,7 @@ impl Policy {
             severities: config.severities,
             duplication_minimum,
             finally_exit: config.finally_exit,
+            empty_handler: config.empty_handler,
             limits: config.limits,
             cognitive_limits: config.cognitive_limits,
             include: compile_globs(&config.include).map_err(invalid)?,
@@ -94,7 +98,11 @@ impl Policy {
         self.severities
             .get(&rule)
             .copied()
-            .unwrap_or(Severity::Error)
+            .unwrap_or(if rule == Rule::EmptyHandler {
+                Severity::Warn
+            } else {
+                Severity::Error
+            })
     }
 
     pub fn active(&self, rule: Rule) -> bool {
@@ -110,6 +118,7 @@ impl Policy {
                     .any(|language| Rule::CognitiveComplexity.supports(*language)))
             || (self.active(Rule::SourceDuplication) && self.duplication_minimum.is_some())
             || (self.active(Rule::FinallyExit) && self.finally_exit)
+            || (self.active(Rule::EmptyHandler) && self.empty_handler)
     }
 
     pub fn active_for(&self, language: Language, rule: Rule) -> bool {
@@ -118,6 +127,7 @@ impl Policy {
                 Rule::CyclomaticComplexity => self.limits.contains_key(&language),
                 Rule::CognitiveComplexity => self.limit(language, rule).is_some(),
                 Rule::FinallyExit => self.finally_exit && rule.supports(language),
+                Rule::EmptyHandler => self.empty_handler && rule.supports(language),
                 Rule::SourceDuplication => {
                     self.duplication_minimum.is_some() && rule.supports(language)
                 }
@@ -134,13 +144,17 @@ impl Policy {
                     .copied()
                     .unwrap_or(DEFAULT_LIMIT),
             ),
-            Rule::CognitiveComplexity | Rule::SourceDuplication | Rule::FinallyExit => None,
+            Rule::CognitiveComplexity
+            | Rule::SourceDuplication
+            | Rule::FinallyExit
+            | Rule::EmptyHandler => None,
         }
     }
 
     pub fn selects(&self, language: Language) -> bool {
         self.limits.contains_key(&language)
             || (self.finally_exit && Rule::FinallyExit.supports(language))
+            || (self.empty_handler && Rule::EmptyHandler.supports(language))
             || (self.duplication_minimum.is_some() && Rule::SourceDuplication.supports(language))
     }
 
@@ -165,7 +179,10 @@ fn validate_config(config: &Config, duplication_minimum: Option<u32>) -> Result<
     if duplication_minimum == Some(0) {
         return Err("duplication.minimum_tokens must be positive".into());
     }
-    if (config.limits.is_empty() && duplication_minimum.is_none() && !config.finally_exit)
+    if (config.limits.is_empty()
+        && duplication_minimum.is_none()
+        && !config.finally_exit
+        && !config.empty_handler)
         || config.limits.values().any(|&limit| limit == 0)
     {
         return Err("limits must enable at least one language and be positive".into());
@@ -294,7 +311,10 @@ impl Baseline {
         {
             if !valid_identity(identity)
                 || !rule.supports(identity.language)
-                || matches!(*rule, Rule::SourceDuplication | Rule::FinallyExit)
+                || matches!(
+                    *rule,
+                    Rule::SourceDuplication | Rule::FinallyExit | Rule::EmptyHandler
+                )
                 || *score == 0
             {
                 return Err(invalid(format!(

@@ -67,6 +67,7 @@ pub fn scan(root: &Path, paths: &[PathBuf], policy: &Policy) -> Scan {
                 scan.files_scanned += 1;
                 scan.analysis.callables.extend(result.callables);
                 scan.analysis.finally_exits.extend(result.finally_exits);
+                scan.analysis.empty_handlers.extend(result.empty_handlers);
                 scan.analysis.scope_counts.extend(result.scope_counts);
                 if result
                     .diagnostics
@@ -184,6 +185,7 @@ fn scan_file(
         Rule::CognitiveComplexity,
         Rule::SourceDuplication,
         Rule::FinallyExit,
+        Rule::EmptyHandler,
     ]
     .into_iter()
     .any(|rule| policy.active_for(language, rule));
@@ -228,6 +230,7 @@ fn scan_file(
         policy.active_for(language, Rule::CyclomaticComplexity),
         policy.active_for(language, Rule::CognitiveComplexity),
         policy.active_for(language, Rule::FinallyExit),
+        policy.active_for(language, Rule::EmptyHandler),
     )
     .map(Some)
 }

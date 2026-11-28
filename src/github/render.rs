@@ -125,6 +125,11 @@ impl<'a> From<&'a Finding> for Message<'a> {
                 );
                 (text, primary.path.as_str(), primary.range.start)
             }
+            Detail::EmptyHandler(finding) => (
+                format!("{severity} empty-handler: {} ({status})", finding.message),
+                finding.identity.path.as_str(),
+                finding.range.start,
+            ),
             Detail::FinallyExit(finding) => (
                 format!("{severity} finally-exit: {} ({status})", finding.message),
                 finding.identity.path.as_str(),
@@ -264,7 +269,14 @@ fn location_summary(location: &Location, revision: Option<&str>, url: Option<&st
                 url,
             )
         }
-        Location::FinallyExit {
+        Location::EmptyHandler {
+            identity,
+            name,
+            range,
+            message,
+            ..
+        }
+        | Location::FinallyExit {
             identity,
             name,
             range,

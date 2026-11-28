@@ -49,6 +49,8 @@ To compare TypeScript and TSX for source duplication, add `"duplication": {}` to
 
 Set `"finally_exit": true` to report `return`, `break`, or `continue` when the statement leaves a `finally` block in TypeScript, TSX or Python. Start with `"severities": {"finally-exit": "warn"}` to review existing findings. Each finding points at the transfer and explains which pending outcome it can discard. [Finally exit rule](docs/rules/finally-exit.md)
 
+Set `"empty_handler": true` to report empty TypeScript/TSX catches and Python bare or `Exception` handlers containing only `pass` or `...`. Findings are advisory by default; opt into enforcement with `"severities": {"empty-handler": "error"}`. [Empty exception handler rule](docs/rules/empty-handler.md)
+
 Use `--config /path/to/policy.json` to select another policy. To scan specific files or directories within the configured selection, pass their root-relative paths after `--`.
 
 ## Adopt the gate
@@ -141,7 +143,7 @@ The Actions summary shows new and worsened findings before improvements, fixes, 
 
 `compare` adds a `comparison` object with its own `format_version: 1`, the base and candidate revisions when supplied, and a coverage status. A complete comparison includes an `unchanged` count and an ordered `changes` list. Each change has a category, match status, rule, limit, and previous and current observations when available. Observations include scores, locations, and enforcement disposition. A passing score has a null disposition. A callable crossing the limit is `new`, a callable returning to the limit or below is `fixed`, and a finding without a trusted counterpart is listed as `new` or `removed`. Ambiguous entries are marked and sorted after other entries within their category. Changes between two passing scores are omitted.
 
-Enabling `finally_exit` selects report format 3 and comparison format 2. Existing scored findings retain their fields. A `finally-exit` finding carries the statement location, transfer kind and explanation. Its finding and comparison observations omit numeric measurements. Repositories using the GitHub App should upgrade their publisher before enabling the rule in the scanner policy.
+Enabling `finally_exit` or `empty_handler` selects report format 3 and comparison format 2. Existing scored findings retain their fields. A `finally-exit` finding carries the statement location, transfer kind and explanation. Its finding and comparison observations omit numeric measurements. Repositories using the GitHub App should upgrade their publisher before enabling the rule in the scanner policy.
 
 When analysis is incomplete, the comparison reports `unavailable` with a reason and any base diagnostics. With an explicit trusted `--config`, you can omit `--base-root` and still receive the full candidate report. The exit code always reflects the candidate gate.
 

@@ -138,24 +138,21 @@ fn valid_finding(finding: &Value, version: u64) -> bool {
 }
 
 fn valid_metrics(finding: &Value, version: u64) -> bool {
-    if finding["rule"] != "finally-exit" {
-        return finding["score"].as_i64().is_some() && finding["limit"].as_i64().is_some();
-    }
+    let fields: &[&str] = match finding["rule"].as_str() {
+        Some("empty-handler") => &["path", "language", "name", "cause", "body_shape", "message"],
+        Some("finally-exit") => &["path", "language", "name", "transfer", "message"],
+        _ => return finding["score"].as_i64().is_some() && finding["limit"].as_i64().is_some(),
+    };
     version == 3
         && finding.get("score").is_none()
         && finding.get("limit").is_none()
-        && ["path", "language", "name", "transfer", "message"]
+        && fields
             .iter()
             .all(|key| finding[*key].as_str().is_some_and(|text| !text.is_empty()))
         && finding["scope"].is_array()
-        && serde_json::from_value::<crate::model::Range>(finding["range"].clone()).is_ok_and(
-            |range| {
-                range.start.line > 0
-                    && range.start.column > 0
-                    && range.end.line > 0
-                    && range.end.column > 0
-            },
-        )
+        && serde_json::from_value::<crate::model::Range>(finding["range"].clone()).is_ok_and(|r| {
+            r.start.line > 0 && r.start.column > 0 && r.end.line > 0 && r.end.column > 0
+        })
 }
 
 fn valid_severity(finding: &Value, version: u64, status: &str, severity: Option<&str>) -> bool {

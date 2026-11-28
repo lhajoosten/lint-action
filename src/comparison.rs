@@ -1,8 +1,9 @@
 use crate::duplication::{Match, Occurrence, Pair};
-use crate::model::{Callable, Diagnostic, FinallyExit, Identity, Range, Rule};
+use crate::model::{Callable, Diagnostic, EmptyHandler, FinallyExit, Identity, Range, Rule};
 use crate::policy::{BaselineScores, Policy, Severity};
 use crate::{
     ScoredTree, Status, complexity_status, duplication_status, finally_exit_status, unique,
+    unscored_status,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -76,6 +77,15 @@ pub(crate) enum Location {
         transfer: String,
         message: String,
     },
+    EmptyHandler {
+        #[serde(flatten)]
+        identity: Identity,
+        name: String,
+        range: Range,
+        cause: String,
+        body_shape: String,
+        message: String,
+    },
     Duplication {
         occurrences: [Occurrence; 2],
     },
@@ -85,6 +95,9 @@ impl Observation {
     fn position(&self) -> (&str, usize, usize) {
         let (path, range) = match &self.location {
             Location::Callable {
+                identity, range, ..
+            }
+            | Location::EmptyHandler {
                 identity, range, ..
             }
             | Location::FinallyExit {
@@ -123,7 +136,7 @@ impl Comparison {
     }
 
     pub fn set_policy(&mut self, policy: &Policy) {
-        if policy.finally_exit {
+        if policy.finally_exit || policy.empty_handler {
             self.format_version = 2;
         }
     }
@@ -229,6 +242,7 @@ impl Comparison {
             unchanged += self.compare_duplicates(sides, limit, policy, baseline);
         }
         unchanged += self.compare_finally_exits(sides, policy);
+        unchanged += self.compare_empty_handlers(sides, policy);
         self.unchanged = Some(unchanged);
         self.changes
             .sort_by(|left, right| left.order().cmp(&right.order()));
@@ -275,6 +289,57 @@ impl Comparison {
                 },
                 match_status: MatchStatus::Unmatched,
                 rule: Rule::FinallyExit,
+                limit: None,
+                previous: previous.map(observe),
+                current: current.map(observe),
+            });
+        }
+        unchanged
+    }
+
+    fn compare_empty_handlers(&mut self, sides: [&ScoredTree<'_>; 2], policy: &Policy) -> usize {
+        let mut items = BTreeMap::new();
+        for (side, tree) in sides.into_iter().enumerate() {
+            for item in &tree.empty_handlers {
+                let r = item.range;
+                items
+                    .entry((
+                        &item.identity,
+                        item.cause,
+                        r.start.line,
+                        r.start.column,
+                        r.end.line,
+                        r.end.column,
+                    ))
+                    .or_insert([None; 2])[side] = Some(item);
+            }
+        }
+        let mut unchanged = 0;
+        for [previous, current] in items.into_values() {
+            if previous.is_some() && current.is_some() {
+                unchanged += 1;
+                continue;
+            }
+            let observe = |item: &EmptyHandler| Observation {
+                score: None,
+                status: Some(unscored_status(policy, Rule::EmptyHandler)),
+                location: Location::EmptyHandler {
+                    identity: item.identity.clone(),
+                    name: item.name.clone(),
+                    range: item.range,
+                    cause: item.cause.to_owned(),
+                    body_shape: item.body_shape.to_owned(),
+                    message: item.message.to_owned(),
+                },
+            };
+            self.changes.push(Change {
+                category: if current.is_some() {
+                    Category::New
+                } else {
+                    Category::Removed
+                },
+                match_status: MatchStatus::Unmatched,
+                rule: Rule::EmptyHandler,
                 limit: None,
                 previous: previous.map(observe),
                 current: current.map(observe),

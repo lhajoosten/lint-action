@@ -196,6 +196,14 @@ fn samples_and_counts(report: &ScanReport) -> (Vec<String>, Counts) {
 }
 
 fn valid_metrics(item: &Value, version: u64) -> bool {
+    if item["rule"] == "empty-handler" {
+        return version == 3
+            && item.get("score").is_none()
+            && item.get("limit").is_none()
+            && ["message", "cause", "body_shape"]
+                .iter()
+                .all(|key| item[*key].as_str().is_some_and(|v| !v.is_empty()));
+    }
     if item["rule"] == "finally-exit" {
         return version == 3
             && item.get("score").is_none()

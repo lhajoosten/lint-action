@@ -330,6 +330,9 @@ fn identity(finding: &Value) -> String {
             .collect();
         locations.sort_by_key(|item| identity_json(item, true));
         json!({"rule": finding["rule"], "occurrences": locations})
+    } else if finding["rule"] == "empty-handler" {
+        json!({"rule": finding["rule"], "path": finding["path"], "language": finding["language"],
+            "scope": finding["scope"], "name": finding["name"], "range": finding["range"], "cause": finding["cause"]})
     } else if finding["rule"] == "finally-exit" {
         json!({"rule": finding["rule"], "path": finding["path"], "language": finding["language"],
             "scope": finding["scope"], "name": finding["name"], "range": finding["range"],
@@ -948,7 +951,7 @@ fn thread_body(
 }
 
 fn finding_detail(finding: &Value) -> String {
-    if finding["rule"] == "finally-exit" {
+    if finding["rule"] == "finally-exit" || finding["rule"] == "empty-handler" {
         format!("; {}", code(&finding["message"]))
     } else {
         format!(
