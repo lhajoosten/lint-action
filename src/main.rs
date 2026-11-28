@@ -2,6 +2,7 @@ mod analyzer;
 mod cognitive;
 mod comparison;
 mod duplication;
+mod finally;
 mod github;
 mod grammar;
 mod model;
@@ -11,7 +12,9 @@ mod scan;
 use crate::analyzer::Analysis;
 use crate::duplication::{Duplication, Match, Pair};
 use crate::grammar::ANONYMOUS;
-use crate::model::{Callable, Diagnostic, ErrorKind, Identity, Position, Rule, SCORING_VERSION};
+use crate::model::{
+    Callable, Diagnostic, ErrorKind, FinallyExit, Identity, Position, Rule, SCORING_VERSION,
+};
 use crate::policy::{BASELINE_FILE, Baseline, BaselineScores, CONFIG_FILE, Mode, Policy, Severity};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
@@ -151,7 +154,8 @@ enum Status {
 struct Finding {
     #[serde(flatten)]
     detail: Detail,
-    limit: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    limit: Option<u32>,
     severity: Severity,
     status: Status,
 }
@@ -161,12 +165,14 @@ struct Finding {
 enum Detail {
     Complexity(Callable),
     Duplication(Duplication),
+    FinallyExit(FinallyExit),
 }
 
 impl Detail {
     fn location(&self) -> (&str, usize, usize, Rule) {
         let (path, Position { line, column }, rule) = match self {
             Self::Complexity(item) => (&item.identity.path, item.range.start, item.rule),
+            Self::FinallyExit(item) => (&item.identity.path, item.range.start, item.rule),
             Self::Duplication(item) => (
                 &item.occurrences[0].path,
                 item.occurrences[0].range.start,
@@ -214,6 +220,13 @@ impl Report {
         }
     }
 
+    fn set_policy(&mut self, policy: &Policy) {
+        self.mode = Some(policy.mode);
+        if policy.finally_exit {
+            self.format_version = 3;
+        }
+    }
+
     fn status(&self) -> u8 {
         if !self.diagnostics.is_empty() {
             2
@@ -252,7 +265,7 @@ fn scan(
     validate_only: bool,
 ) -> Result<(), Diagnostic> {
     let policy = settings.input.policy()?;
-    report.mode = Some(policy.mode);
+    report.set_policy(&policy);
     let baseline = settings.baseline(policy.mode)?;
     if validate_only {
         return Ok(());
@@ -264,6 +277,7 @@ fn scan(
 }
 
 struct ScoredTree<'a> {
+    finally_exits: Vec<FinallyExit>,
     callables: Vec<Callable>,
     scope_counts: &'a BTreeMap<Identity, usize>,
     matches: Vec<Match<'a>>,
@@ -279,6 +293,7 @@ impl<'a> ScoredTree<'a> {
         let pairs = match_pairs(&matches, &analysis.scope_counts);
         report.diagnostics = std::mem::take(&mut analysis.diagnostics);
         Self {
+            finally_exits: std::mem::take(&mut analysis.finally_exits),
             callables: std::mem::take(&mut analysis.callables),
             scope_counts: &analysis.scope_counts,
             matches,
@@ -301,7 +316,7 @@ impl<'a> ScoredTree<'a> {
                 .sort_by_key(|part| (part.range.start.line, part.range.start.column));
             report.findings.push(Finding {
                 detail: Detail::Complexity(callable),
-                limit,
+                limit: Some(limit),
                 severity,
                 status,
             });
@@ -311,15 +326,32 @@ impl<'a> ScoredTree<'a> {
             for (found, pair) in self.matches.iter().zip(&self.pairs) {
                 report.findings.push(Finding {
                     detail: Detail::Duplication(found.report()),
-                    limit,
+                    limit: Some(limit),
                     severity,
                     status: duplication_status(found, pair.as_ref(), policy, baseline),
                 });
             }
         }
+        let severity = policy.severity(Rule::FinallyExit);
+        report
+            .findings
+            .extend(self.finally_exits.into_iter().map(|exit| Finding {
+                detail: Detail::FinallyExit(exit),
+                limit: None,
+                severity,
+                status: finally_exit_status(policy),
+            }));
         report
             .findings
             .sort_by(|left, right| left.detail.location().cmp(&right.detail.location()));
+    }
+}
+
+fn finally_exit_status(policy: &Policy) -> Status {
+    if policy.severity(Rule::FinallyExit) == Severity::Warn {
+        Status::Reported
+    } else {
+        Status::for_mode(policy.mode, false)
     }
 }
 
@@ -377,7 +409,8 @@ fn compare(
         );
     }
     let policy = settings.input.policy()?;
-    report.mode = Some(policy.mode);
+    report.set_policy(&policy);
+    comparison.set_policy(&policy);
     let baseline = settings.baseline(policy.mode)?;
     let mut scanned = scan::scan(&settings.input.root, &[], &policy);
     let candidate = ScoredTree::new(&mut scanned, &policy, report);
@@ -406,7 +439,7 @@ fn generate(
     report: &mut Report,
 ) -> Result<Option<Vec<u8>>, Diagnostic> {
     let policy = input.policy()?;
-    report.mode = Some(policy.mode);
+    report.set_policy(&policy);
     let scan = scan::scan(&input.root, paths, &policy);
     report.files_scanned = scan.files_scanned;
     report.files_skipped = scan.files_skipped;
@@ -415,6 +448,7 @@ fn generate(
         mut diagnostics,
         scope_counts,
         duplication,
+        ..
     } = scan.analysis;
     let matches = duplication_matches(&policy, &duplication, &mut diagnostics);
     report.diagnostics = diagnostics;
@@ -467,7 +501,7 @@ fn review_baseline(
     report: &mut Report,
 ) -> Result<Option<Vec<PatchOperation>>, Diagnostic> {
     let policy = settings.input.policy()?;
-    report.mode = Some(policy.mode);
+    report.set_policy(&policy);
     let baseline_path = settings.baseline_path();
     let baseline = Baseline::read(&baseline_path)?;
     let scanned = scan::scan(&settings.input.root, &[], &policy);
@@ -478,6 +512,7 @@ fn review_baseline(
         mut diagnostics,
         scope_counts,
         duplication,
+        ..
     } = scanned.analysis;
     let matches = duplication_matches(&policy, &duplication, &mut diagnostics);
     report.diagnostics = diagnostics;

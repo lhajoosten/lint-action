@@ -47,6 +47,8 @@ TypeScript uses limits 10 and 15 in this example. TSX uses 12 for both rules. Se
 
 To compare TypeScript and TSX for source duplication, add `"duplication": {}` to the policy. It uses a minimum of 50 shared syntax tokens by default. See the [source duplication rule](docs/rules/source-duplication.md) for matching and rollout details.
 
+Set `"finally_exit": true` to report `return`, `break`, or `continue` when the statement leaves a `finally` block in TypeScript, TSX or Python. Start with `"severities": {"finally-exit": "warn"}` to review existing findings. Each finding points at the transfer and explains which pending outcome it can discard. [Finally exit rule](docs/rules/finally-exit.md)
+
 Use `--config /path/to/policy.json` to select another policy. To scan specific files or directories within the configured selection, pass their root-relative paths after `--`.
 
 ## Adopt the gate
@@ -135,9 +137,11 @@ The Actions summary shows new and worsened findings before improvements, fixes, 
 
 ## Report contract
 
-`scan` writes JSON with `format_version: 2`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. All findings include a stable rule ID, severity, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by the first occurrence's path and start position, then by rule. Complexity findings retain the source path, language, callable name, scope, and range. Cognitive findings include the scoring contributions. Duplication findings carry two locations in `occurrences`, and `limit` is an inclusive minimum. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, empty scans, and the duplication analysis budget.
+`scan` writes JSON with `format_version: 2`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. Scored findings include a stable rule ID, severity, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by the first occurrence's path and start position, then by rule. Complexity findings retain the source path, language, callable name, scope, and range. Cognitive findings include the scoring contributions. Duplication findings carry two locations in `occurrences`, and `limit` is an inclusive minimum. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, empty scans, and the duplication analysis budget.
 
 `compare` adds a `comparison` object with its own `format_version: 1`, the base and candidate revisions when supplied, and a coverage status. A complete comparison includes an `unchanged` count and an ordered `changes` list. Each change has a category, match status, rule, limit, and previous and current observations when available. Observations include scores, locations, and enforcement disposition. A passing score has a null disposition. A callable crossing the limit is `new`, a callable returning to the limit or below is `fixed`, and a finding without a trusted counterpart is listed as `new` or `removed`. Ambiguous entries are marked and sorted after other entries within their category. Changes between two passing scores are omitted.
+
+Enabling `finally_exit` selects report format 3 and comparison format 2. Existing scored findings retain their fields. A `finally-exit` finding carries the statement location, transfer kind and explanation. Its finding and comparison observations omit numeric measurements. Repositories using the GitHub App should upgrade their publisher before enabling the rule in the scanner policy.
 
 When analysis is incomplete, the comparison reports `unavailable` with a reason and any base diagnostics. With an explicit trusted `--config`, you can omit `--base-root` and still receive the full candidate report. The exit code always reflects the candidate gate.
 

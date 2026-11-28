@@ -111,7 +111,9 @@ impl<'a> From<&'a Finding> for Message<'a> {
     fn from(item: &'a Finding) -> Self {
         let status = label(item.status);
         let severity = label(item.severity);
-        let limit = item.limit;
+        let limit = item
+            .limit
+            .map_or_else(String::new, |limit| limit.to_string());
         let (text, path, position) = match &item.detail {
             Detail::Duplication(duplicate) => {
                 let [primary, secondary] = &duplicate.occurrences;
@@ -123,6 +125,11 @@ impl<'a> From<&'a Finding> for Message<'a> {
                 );
                 (text, primary.path.as_str(), primary.range.start)
             }
+            Detail::FinallyExit(finding) => (
+                format!("{severity} finally-exit: {} ({status})", finding.message),
+                finding.identity.path.as_str(),
+                finding.range.start,
+            ),
             Detail::Complexity(callable) => {
                 let rule = label(callable.rule).replace('-', " ");
                 let mut text = format!(
@@ -198,25 +205,30 @@ fn change_summary(change: &Change, comparison: &Comparison, url: Option<&str>) -
         .or(change.previous.as_ref())
         .unwrap();
     let score = match (&change.previous, &change.current) {
-        (Some(previous), Some(current)) => format!("{} → {}", previous.score, current.score),
-        _ => active.score.to_string(),
+        (Some(previous), Some(current)) => match (previous.score, current.score) {
+            (Some(previous), Some(current)) => format!(" {previous} → {current}"),
+            _ => String::new(),
+        },
+        _ => active
+            .score
+            .map_or_else(String::new, |score| format!(" {score}")),
     };
     let rule = label(change.rule);
-    let limit = if rule == "source-duplication" {
-        "minimum"
-    } else {
-        "limit"
-    };
+    let limit = change.limit.map_or_else(String::new, |limit| {
+        let label = if rule == "source-duplication" {
+            "minimum"
+        } else {
+            "limit"
+        };
+        format!("{label} {limit}, ")
+    });
     let status = active.status.map_or_else(|| "passing".to_owned(), label);
     let match_status = match change.match_status {
         MatchStatus::Matched => "",
         MatchStatus::Ambiguous => ", ambiguous identity",
         MatchStatus::Unmatched => ", no matched finding",
     };
-    let mut line = format!(
-        "- {rule} {score} ({limit} {}, {status}{match_status})",
-        change.limit
-    );
+    let mut line = format!("- {rule}{score} ({limit}{status}{match_status})");
     for (side, item, revision) in [
         (
             "base",
@@ -230,38 +242,62 @@ fn change_summary(change: &Change, comparison: &Comparison, url: Option<&str>) -
         ),
     ] {
         let Some(item) = item else { continue };
-        let location = match &item.location {
-            Location::Callable {
-                identity,
-                name,
-                range,
-            } => {
-                let path = &identity.path;
+        let location = location_summary(&item.location, revision, url);
+        write!(line, " · {side}: {location}").unwrap();
+    }
+    line
+}
+
+fn location_summary(location: &Location, revision: Option<&str>, url: Option<&str>) -> String {
+    match location {
+        Location::Callable {
+            identity,
+            name,
+            range,
+        } => {
+            let path = &identity.path;
+            source_link(
+                path,
+                *range,
+                &format!("{name} at {}", occurrence(path, *range)),
+                revision,
+                url,
+            )
+        }
+        Location::FinallyExit {
+            identity,
+            name,
+            range,
+            message,
+            ..
+        } => {
+            let path = &identity.path;
+            format!(
+                "{} — {}",
                 source_link(
                     path,
                     *range,
                     &format!("{name} at {}", occurrence(path, *range)),
                     revision,
+                    url
+                ),
+                summary_text(message)
+            )
+        }
+        Location::Duplication { occurrences } => occurrences
+            .iter()
+            .map(|part| {
+                source_link(
+                    &part.path,
+                    part.range,
+                    &occurrence(&part.path, part.range),
+                    revision,
                     url,
                 )
-            }
-            Location::Duplication { occurrences } => occurrences
-                .iter()
-                .map(|part| {
-                    source_link(
-                        &part.path,
-                        part.range,
-                        &occurrence(&part.path, part.range),
-                        revision,
-                        url,
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(" and "),
-        };
-        write!(line, " · {side}: {location}").unwrap();
+            })
+            .collect::<Vec<_>>()
+            .join(" and "),
     }
-    line
 }
 
 fn comparison_summary(

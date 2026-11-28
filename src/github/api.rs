@@ -11,6 +11,7 @@ pub enum Error {
     Status { operation: String, status: u16 },
     Network,
     Metadata,
+    Diagnostic(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
