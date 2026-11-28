@@ -2,6 +2,39 @@
 
 <!-- release-log:pending:v1 sha256:62e6a04c819cc7ae795011be4b388124f6df6f4b358ea5d2b73abef9f14c1341 -->
 
+## v0.2.0
+
+### ✨ Features
+
+- publish advisory Lint Gate checks with a GitHub App ([#31](https://github.com/lhajoosten/lint-gate/pull/31)) by [@lhajoosten](https://github.com/lhajoosten)
+- configure per-rule severity ([#34](https://github.com/lhajoosten/lint-gate/pull/34)) by [@lhajoosten](https://github.com/lhajoosten)
+- propose safe baseline reductions ([#36](https://github.com/lhajoosten/lint-gate/pull/36)) by [@lhajoosten](https://github.com/lhajoosten)
+- compare lint findings across pull requests ([#40](https://github.com/lhajoosten/lint-gate/pull/40)) by [@lhajoosten](https://github.com/lhajoosten)
+- publish severity-aware review conversations ([#42](https://github.com/lhajoosten/lint-gate/pull/42)) by [@lhajoosten](https://github.com/lhajoosten)
+- flag control flow that exits finally blocks ([#59](https://github.com/lhajoosten/lint-gate/pull/59)) by [@lhajoosten](https://github.com/lhajoosten)
+- add actionable terminal scan reports ([#61](https://github.com/lhajoosten/lint-gate/pull/61)) by [@lhajoosten](https://github.com/lhajoosten)
+
+### 🐛 Fixes
+
+- enable blocking lint conversations ([#45](https://github.com/lhajoosten/lint-gate/pull/45)) by [@lhajoosten](https://github.com/lhajoosten)
+- reconcile denied review-thread resolutions ([#58](https://github.com/lhajoosten/lint-gate/pull/58)) by [@lhajoosten](https://github.com/lhajoosten)
+
+### 📚 Documentation
+
+- add a Lint Gate banner to the README ([#27](https://github.com/lhajoosten/lint-gate/pull/27)) by [@lhajoosten](https://github.com/lhajoosten)
+
+### 🔧 Internal maintenance
+
+- verify tagged releases for GitHub Marketplace ([#32](https://github.com/lhajoosten/lint-gate/pull/32)) by [@lhajoosten](https://github.com/lhajoosten)
+- restore the App pilot with a pinned reusable scanner ([#35](https://github.com/lhajoosten/lint-gate/pull/35)) by [@lhajoosten](https://github.com/lhajoosten)
+- cover interacting syntax in CLI fixtures ([#39](https://github.com/lhajoosten/lint-gate/pull/39)) by [@lhajoosten](https://github.com/lhajoosten)
+- validate Conventional Commit PR titles ([#41](https://github.com/lhajoosten/lint-gate/pull/41)) by [@lhajoosten](https://github.com/lhajoosten)
+- port GitHub tooling to Rust ([#44](https://github.com/lhajoosten/lint-gate/pull/44)) by [@lhajoosten](https://github.com/lhajoosten)
+- benchmark exact pairs on pinned and repetitive inputs ([#60](https://github.com/lhajoosten/lint-gate/pull/60)) by [@lhajoosten](https://github.com/lhajoosten)
+- prepare the Rolling Release v0.10.0 cutover ([#62](https://github.com/lhajoosten/lint-gate/pull/62)) by [@lhajoosten](https://github.com/lhajoosten)
+
+[Full changelog v0.1.1...v0.2.0](https://github.com/lhajoosten/lint-gate/compare/v0.1.1...v0.2.0)
+
 ## v0.1.1 (2026-11-22)
 
 ### 👷 Continuous integration
