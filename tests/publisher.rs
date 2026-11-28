@@ -680,6 +680,38 @@ fn finding(name: &str, line: u64, status: &str) -> Value {
 }
 
 #[test]
+fn conversation_publishes_unscored_finally_findings_and_rejects_legacy_version() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    let mut blocker = finding("flow", 2, "blocking");
+    blocker["rule"] = json!("finally-exit");
+    blocker["range"]["end"] = json!({"line": 2, "column": 7});
+    blocker["transfer"] = json!("return");
+    blocker["message"] = json!("return exits finally");
+    blocker.as_object_mut().unwrap().remove("score");
+    blocker.as_object_mut().unwrap().remove("limit");
+    let invalid = fixture.publish(2, &[blocker.clone()], true, &["flow.ts"], |_| {});
+    assert!(!invalid.status.success());
+    let mut malformed = blocker.clone();
+    malformed["range"].as_object_mut().unwrap().remove("end");
+    let invalid = fixture.publish(3, &[malformed], true, &["flow.ts"], |_| {});
+    assert!(!invalid.status.success());
+    let valid = fixture.publish(3, &[blocker.clone()], true, &["flow.ts"], |_| {});
+    assert!(valid.status.success(), "{valid:?}");
+    let state = fixture.mock.state.lock().unwrap();
+    let body = state.reviews[0]["body"].as_str().unwrap();
+    assert!(body.contains("return exits finally"));
+    assert!(!body.contains("null"));
+    assert!(!body.contains("score"));
+    drop(state);
+    blocker["transfer"] = json!("break");
+    let valid = fixture.publish(3, &[blocker], true, &["flow.ts"], |_| {});
+    assert!(valid.status.success(), "{valid:?}");
+    let state = fixture.mock.state.lock().unwrap();
+    assert_eq!(state.reviews.len(), 2);
+}
+
+#[test]
 fn conversation_keeps_existing_thread_identity_and_fixes_resolve_only_app_threads() {
     let fixture = PublicationFixture::new();
     fixture.blocking(true);
@@ -702,6 +734,7 @@ fn conversation_keeps_existing_thread_identity_and_fixes_resolve_only_app_thread
             "<!-- lint-gate-finding:e70b2329e2f09e1ec4cbf37ecf035ddfda6f7a2d762c077c66e5159236ddfb9e -->"
         ));
         let summary = state.issue["body"].as_str().unwrap();
+        assert!(summary.contains(" · score `3`, limit `1`"), "{summary}");
         assert!(summary.contains(r"\u0040everyone \u003cdetails> \u0060warning\u0060"));
         assert!(!summary.contains("existing debt"));
         state

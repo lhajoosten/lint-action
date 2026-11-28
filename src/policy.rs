@@ -42,6 +42,8 @@ struct Config {
     cognitive_limits: BTreeMap<Language, u32>,
     #[serde(default)]
     duplication: Option<DuplicationConfig>,
+    #[serde(default)]
+    finally_exit: bool,
     #[serde(default = "all_paths")]
     include: Vec<String>,
     #[serde(default)]
@@ -63,6 +65,7 @@ pub struct Policy {
     pub mode: Mode,
     severities: BTreeMap<Rule, Severity>,
     pub duplication_minimum: Option<u32>,
+    pub finally_exit: bool,
     limits: BTreeMap<Language, u32>,
     cognitive_limits: BTreeMap<Language, u32>,
     include: GlobSet,
@@ -73,37 +76,13 @@ impl Policy {
     pub fn load(path: &Path) -> Result<Self, Diagnostic> {
         let invalid = |message: String| policy_error(ErrorKind::InvalidConfig, path, message);
         let config: Config = read_json(path, MAX_FILE_BYTES).map_err(invalid)?;
-        let duplication_minimum = config.duplication.map(|rule| rule.minimum_tokens);
-        if duplication_minimum == Some(0) {
-            return Err(invalid(
-                "duplication.minimum_tokens must be positive".into(),
-            ));
-        }
-        if (config.limits.is_empty() && duplication_minimum.is_none())
-            || config.limits.values().any(|&limit| limit == 0)
-        {
-            return Err(invalid(
-                "limits must enable at least one language and be positive".into(),
-            ));
-        }
-        for (&language, &limit) in &config.cognitive_limits {
-            if limit == 0
-                || !Rule::CognitiveComplexity.supports(language)
-                || !config.limits.contains_key(&language)
-            {
-                return Err(invalid(
-                    "cognitive_limits requires positive limits for enabled TypeScript or TSX"
-                        .into(),
-                ));
-            }
-        }
-        if config.include.is_empty() {
-            return Err(invalid("include must contain at least one glob".into()));
-        }
+        let duplication_minimum = config.duplication.as_ref().map(|rule| rule.minimum_tokens);
+        validate_config(&config, duplication_minimum).map_err(invalid)?;
         Ok(Self {
             mode: config.mode,
             severities: config.severities,
             duplication_minimum,
+            finally_exit: config.finally_exit,
             limits: config.limits,
             cognitive_limits: config.cognitive_limits,
             include: compile_globs(&config.include).map_err(invalid)?,
@@ -130,6 +109,7 @@ impl Policy {
                     .keys()
                     .any(|language| Rule::CognitiveComplexity.supports(*language)))
             || (self.active(Rule::SourceDuplication) && self.duplication_minimum.is_some())
+            || (self.active(Rule::FinallyExit) && self.finally_exit)
     }
 
     pub fn active_for(&self, language: Language, rule: Rule) -> bool {
@@ -137,6 +117,7 @@ impl Policy {
             && match rule {
                 Rule::CyclomaticComplexity => self.limits.contains_key(&language),
                 Rule::CognitiveComplexity => self.limit(language, rule).is_some(),
+                Rule::FinallyExit => self.finally_exit && rule.supports(language),
                 Rule::SourceDuplication => {
                     self.duplication_minimum.is_some() && rule.supports(language)
                 }
@@ -153,12 +134,13 @@ impl Policy {
                     .copied()
                     .unwrap_or(DEFAULT_LIMIT),
             ),
-            Rule::CognitiveComplexity | Rule::SourceDuplication => None,
+            Rule::CognitiveComplexity | Rule::SourceDuplication | Rule::FinallyExit => None,
         }
     }
 
     pub fn selects(&self, language: Language) -> bool {
         self.limits.contains_key(&language)
+            || (self.finally_exit && Rule::FinallyExit.supports(language))
             || (self.duplication_minimum.is_some() && Rule::SourceDuplication.supports(language))
     }
 
@@ -177,6 +159,30 @@ impl Policy {
                 .exclude
                 .is_match(format!("{}/", path.to_string_lossy()))
     }
+}
+
+fn validate_config(config: &Config, duplication_minimum: Option<u32>) -> Result<(), String> {
+    if duplication_minimum == Some(0) {
+        return Err("duplication.minimum_tokens must be positive".into());
+    }
+    if (config.limits.is_empty() && duplication_minimum.is_none() && !config.finally_exit)
+        || config.limits.values().any(|&limit| limit == 0)
+    {
+        return Err("limits must enable at least one language and be positive".into());
+    }
+    if config.cognitive_limits.iter().any(|(&language, &limit)| {
+        limit == 0
+            || !Rule::CognitiveComplexity.supports(language)
+            || !config.limits.contains_key(&language)
+    }) {
+        return Err(
+            "cognitive_limits requires positive limits for enabled TypeScript or TSX".into(),
+        );
+    }
+    if config.include.is_empty() {
+        return Err("include must contain at least one glob".into());
+    }
+    Ok(())
 }
 
 fn default_limits() -> BTreeMap<Language, u32> {
@@ -288,7 +294,7 @@ impl Baseline {
         {
             if !valid_identity(identity)
                 || !rule.supports(identity.language)
-                || *rule == Rule::SourceDuplication
+                || matches!(*rule, Rule::SourceDuplication | Rule::FinallyExit)
                 || *score == 0
             {
                 return Err(invalid(format!(

@@ -376,6 +376,102 @@ mod unix {
         );
     }
 
+    fn finally_exit_annotations() {
+        let fixture = Fixture::new();
+        let repo = fixture.workspace.join("action-fixture-pass");
+        fs::write(
+            repo.join("simple.py"),
+            "def f():\n    try: return 1\n    finally: return 2\n",
+        )
+        .unwrap();
+        for (enabled, severity, expected_code) in
+            [(false, "error", 0), (true, "warn", 0), (true, "error", 1)]
+        {
+            let policy = json!({"mode":"strict", "limits":{"python":12}, "finally_exit":enabled, "severities":{"finally-exit":severity}});
+            fs::write(repo.join(CONFIG), policy.to_string()).unwrap();
+            let revision = commit(&repo, "Change the trusted policy");
+            let (annotation, _, path) = fixture.run(
+                fixture
+                    .command(&fixture.workspace, "action-fixture-pass")
+                    .env("LINT_GATE_PR_BASE", revision),
+                expected_code,
+            );
+            let path = path.unwrap();
+            let action = read(&path);
+            let cli = common::command(&fixture.tools)
+                .args(["scan", "--root"])
+                .arg(&repo)
+                .output()
+                .unwrap();
+            assert_eq!(cli.status.code(), Some(expected_code));
+            let local: Value = serde_json::from_slice(&cli.stdout).unwrap();
+            assert_eq!(action["findings"], local["findings"]);
+            if !enabled {
+                assert_eq!(action["findings"], json!([]));
+                assert_eq!(action["format_version"], 2);
+                continue;
+            }
+            let findings = action["findings"].as_array().unwrap();
+            assert_eq!(findings.len(), 1);
+            let finding = &findings[0];
+            assert_eq!(finding["rule"], "finally-exit");
+            assert_eq!(finding["range"]["start"], json!({"line":3,"column":14}));
+            assert!(finding.get("score").is_none() && finding.get("limit").is_none());
+            let level = if severity == "warn" {
+                "warning"
+            } else {
+                "error"
+            };
+            assert!(annotation.contains(&format!("::{level} title=lint-gate quality gate,file=action-fixture-pass/simple.py,line=3,col=14::")), "{annotation}");
+            let sample = fixture.normalize(&path);
+            assert!(
+                sample["samples"][0]
+                    .as_str()
+                    .unwrap()
+                    .contains("finally-exit")
+            );
+            assert!(
+                sample["samples"][0]
+                    .as_str()
+                    .unwrap()
+                    .contains(finding["message"].as_str().unwrap())
+            );
+            let mut invalid = action.clone();
+            invalid["format_version"] = json!(2);
+            assert_normalization_rejected(&fixture, &invalid);
+            invalid["format_version"] = json!(3);
+            invalid["findings"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("message");
+            assert_normalization_rejected(&fixture, &invalid);
+            invalid = action.clone();
+            invalid["findings"][0]["score"] = json!(null);
+            assert_normalization_rejected(&fixture, &invalid);
+            invalid = action.clone();
+            invalid["findings"][0]["rule"] = json!("cyclomatic-complexity");
+            assert_normalization_rejected(&fixture, &invalid);
+            invalid["findings"][0]["score"] = json!(2);
+            assert_normalization_rejected(&fixture, &invalid);
+            assert_eq!(action["comparison"]["unchanged"], 1);
+        }
+    }
+
+    fn assert_normalization_rejected(fixture: &Fixture, report: &Value) {
+        let path = fixture.path("invalid-report.json");
+        fs::write(&path, report.to_string()).unwrap();
+        let output = common::command(&fixture.tools)
+            .arg("github-app-report")
+            .env("SCAN_REPORT", path)
+            .env("RUNNER_TEMP", fixture.directory.path())
+            .env("GITHUB_RUN_ID", "100")
+            .env("GITHUB_RUN_ATTEMPT", "1")
+            .env("GITHUB_SHA", &fixture.revision)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{output:?}");
+    }
+
     fn exact_event_base_and_synthetic_merge() {
         let fixture = Fixture::new();
         let repository = fixture.workspace.join("action-fixture-fail");
@@ -577,6 +673,7 @@ mod unix {
         match args.as_slice() {
             [] => {
                 trusted_policy_and_output();
+                finally_exit_annotations();
                 exact_event_base_and_synthetic_merge();
                 stage_verified_scan_evidence();
             }

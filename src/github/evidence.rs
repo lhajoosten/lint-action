@@ -99,7 +99,7 @@ pub fn bounded_json(path: &Path) -> Result<(Value, Vec<u8>)> {
 
 pub fn findings(report: &Value) -> Option<&[Value]> {
     let version = report["format_version"].as_u64()?;
-    if !matches!(version, 1 | 2)
+    if !matches!(version, 1..=3)
         || report["scoring_version"].as_i64().is_none()
         || report["files_scanned"].as_u64().is_none()
         || report["diagnostics"]
@@ -123,10 +123,7 @@ fn valid_finding(finding: &Value, version: u64) -> bool {
         return false;
     };
     let severity = finding["severity"].as_str();
-    if !valid_severity(finding, version, status, severity)
-        || finding["score"].as_i64().is_none()
-        || finding["limit"].as_i64().is_none()
-    {
+    if !valid_severity(finding, version, status, severity) || !valid_metrics(finding, version) {
         return false;
     }
     match finding["rule"].as_str() {
@@ -140,9 +137,30 @@ fn valid_finding(finding: &Value, version: u64) -> bool {
     }
 }
 
+fn valid_metrics(finding: &Value, version: u64) -> bool {
+    if finding["rule"] != "finally-exit" {
+        return finding["score"].as_i64().is_some() && finding["limit"].as_i64().is_some();
+    }
+    version == 3
+        && finding.get("score").is_none()
+        && finding.get("limit").is_none()
+        && ["path", "language", "name", "transfer", "message"]
+            .iter()
+            .all(|key| finding[*key].as_str().is_some_and(|text| !text.is_empty()))
+        && finding["scope"].is_array()
+        && serde_json::from_value::<crate::model::Range>(finding["range"].clone()).is_ok_and(
+            |range| {
+                range.start.line > 0
+                    && range.start.column > 0
+                    && range.end.line > 0
+                    && range.end.column > 0
+            },
+        )
+}
+
 fn valid_severity(finding: &Value, version: u64, status: &str, severity: Option<&str>) -> bool {
     !(!matches!(status, "reported" | "baselined" | "blocking")
-        || (version == 2 || !finding["severity"].is_null())
+        || (version >= 2 || !finding["severity"].is_null())
             && !matches!(severity, Some("error" | "warn" | "pass"))
         || matches!(status, "blocking" | "baselined") && !matches!(severity, None | Some("error"))
         || status == "reported" && severity == Some("pass"))

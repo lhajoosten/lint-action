@@ -239,3 +239,125 @@ fn python_stubs_and_deterministic_output() {
     assert_eq!(report["findings"][1]["language"], "python");
     assert_eq!(report["findings"][1]["score"], 2);
 }
+
+#[test]
+fn finally_exit_contract() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let tools = common::without_python();
+    let run = |args: &[&str], expected| {
+        let result = common::command(&tools)
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(
+            result.status.code(),
+            Some(expected),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<Value>(&result.stdout).unwrap()
+    };
+    let config = dir.join(".lint-action.json");
+    let policy = json!({"mode":"report-only", "limits":{}, "finally_exit":true});
+    fs::write(&config, policy.to_string()).unwrap();
+    for ext in ["ts", "tsx"] {
+        fs::write(
+            dir.join(format!("file.{ext}")),
+            "function f() { try { run(); } finally { return 42; } }\n",
+        )
+        .unwrap();
+    }
+    fs::write(
+        dir.join("file.py"),
+        "def f():\n    try: run()\n    finally: return 42\n",
+    )
+    .unwrap();
+    let report = run(&["scan"], 0);
+    assert_eq!(report["format_version"], 3);
+    let findings = report["findings"].as_array().unwrap();
+    assert_eq!(findings.len(), 3);
+    for (item, path, line, start, end) in [
+        (&findings[0], "file.py", 3, 14, 23),
+        (&findings[1], "file.ts", 1, 41, 51),
+        (&findings[2], "file.tsx", 1, 41, 51),
+    ] {
+        assert_eq!(item["path"], path);
+        assert_eq!(item["rule"], "finally-exit");
+        assert_eq!(item["status"], "reported");
+        assert_eq!(item["transfer"], "return");
+        let message = item["message"].as_str().unwrap();
+        assert!(message.contains("exception") && message.contains("return"));
+        assert_eq!(
+            item["range"],
+            json!({"start":{"line":line,"column":start},"end":{"line":line,"column":end}})
+        );
+        assert!(item.get("score").is_none() && item.get("limit").is_none());
+    }
+    let baseline = run(&["baseline"], 0);
+    assert_eq!(baseline["entries"], json!([]));
+    fs::write(dir.join(".lint-action-baseline.json"), baseline.to_string()).unwrap();
+    let mut policy = policy;
+    policy["mode"] = json!("baseline");
+    fs::write(config, policy.to_string()).unwrap();
+    let enforced = run(&["scan"], 1);
+    assert!(
+        enforced["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["status"] == "blocking")
+    );
+}
+
+#[test]
+fn compare_finally_exits_under_base_policy() {
+    let base = tempfile::tempdir().unwrap();
+    let candidate = tempfile::tempdir().unwrap();
+    let tools = common::without_python();
+    fs::write(
+        base.path().join(".lint-action.json"),
+        r#"{"mode":"strict","finally_exit":true,"limits":{}}"#,
+    )
+    .unwrap();
+    fs::write(
+        candidate.path().join(".lint-action.json"),
+        r#"{"mode":"report-only","finally_exit":false}"#,
+    )
+    .unwrap();
+    let unsafe_source = "def f():\n    try: run()\n    finally: return 0\n";
+    let safe_source = "def f():\n    try: run()\n    finally: close()\n";
+    for (file, before, after) in [
+        ("new.py", safe_source, unsafe_source),
+        ("removed.py", unsafe_source, safe_source),
+        ("unchanged.py", unsafe_source, unsafe_source),
+    ] {
+        fs::write(base.path().join(file), before).unwrap();
+        fs::write(candidate.path().join(file), after).unwrap();
+    }
+    let output = common::command(&tools)
+        .arg("compare")
+        .arg("--root")
+        .arg(candidate.path())
+        .arg("--base-root")
+        .arg(base.path())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let comparison = &report["comparison"];
+    assert_eq!(comparison["format_version"], 2);
+    assert_eq!(comparison["unchanged"], 1);
+    let changes = comparison["changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 2);
+    for (change, category, side, path) in [
+        (&changes[0], "new", "current", "new.py"),
+        (&changes[1], "removed", "previous", "removed.py"),
+    ] {
+        assert_eq!(change["category"], category);
+        assert_eq!(change[side]["path"], path);
+        assert_eq!(change[side]["transfer"], "return");
+        assert!(change[side].get("score").is_none() && change.get("limit").is_none());
+    }
+}
