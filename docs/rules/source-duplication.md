@@ -57,3 +57,5 @@ A report-only scan of 91 TypeScript source files at Release Log commit `8c4ff5a`
 | 75 | 2 |
 
 At the default, the largest match shared 99 tokens between `src/approval/history.ts` and `src/version-file-inputs.ts`. Another shared 82 tokens between `src/publication/github-write.ts` and `src/publication/registry.ts`.
+
+To compare a matcher change against the exact ordered findings at all three thresholds, run the [duplication benchmark](../../benchmarks/duplication/README.md). The offline workloads also exercise adjacent repeats, a third copy matching unchanged files, and an exhausted scan.
