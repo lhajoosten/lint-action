@@ -94,18 +94,24 @@ pub fn analyze(
                 &ancestors,
             );
         }
-        let mut nested = false;
+        let mut nested = 0;
         if let Some(frame) = active.last_mut() {
             if cyclomatic_enabled {
                 result.callables[frame.cyclomatic_index].score +=
                     u64::from(decision_points(language, node));
             }
             if let Some(index) = frame.cognitive_index {
-                nested = !is_callable && cognitive::enters_nested_flow(node);
-                frame.depth += u32::from(nested);
+                nested = if is_callable {
+                    0
+                } else {
+                    cognitive::nesting(language, node, &ancestors)
+                };
+                frame.depth += nested;
                 let metric = &mut result.callables[index];
-                metric.score += u64::from(cognitive::score(
+                metric.score += u64::from(cognitive::score_for_language(
+                    language,
                     node,
+                    &ancestors,
                     frame.depth,
                     &mut metric.contributions,
                 ));
@@ -137,11 +143,11 @@ pub fn analyze(
             if is_callable {
                 active.pop();
             }
-            if nested {
+            if nested > 0 {
                 active
                     .last_mut()
                     .expect("nesting is inside a callable")
-                    .depth -= 1;
+                    .depth -= nested;
             }
             if cursor.goto_next_sibling() {
                 break;
@@ -230,5 +236,105 @@ fn collect_finally(
             transfer: node.kind().trim_end_matches("_statement").to_owned(),
             message: "Control flow leaving finally can suppress an exception or override an earlier return.",
         });
+    }
+}
+
+#[cfg(test)]
+mod python_cognitive_tests {
+    use super::*;
+
+    fn score(source: &str) -> (u64, Vec<(&'static str, u32)>) {
+        let analysis = analyze(
+            "test.py",
+            Language::Python,
+            source,
+            None,
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(analysis.diagnostics.is_empty());
+        let metric = &analysis.callables[0];
+        (
+            metric.score,
+            metric
+                .contributions
+                .iter()
+                .map(|c| (c.construct, c.points))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn branches_headers_and_unscored_blocks() {
+        let source = "def f(x):\n    if (1 if x else 2):\n        while x:\n            pass\n    elif x:\n        if x: pass\n    else:\n        for x in y:\n            pass\n    try:\n        with x:\n            pass\n    except* ValueError:\n        if x: pass\n    else:\n        pass\n    finally:\n        pass\n";
+        assert_eq!(
+            score(source),
+            (
+                14,
+                vec![
+                    ("if", 1),
+                    ("conditional expression", 1),
+                    ("while", 2),
+                    ("elif", 1),
+                    ("if", 2),
+                    ("else", 1),
+                    ("for", 2),
+                    ("except", 1),
+                    ("if", 2),
+                    ("else", 1)
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn comprehensions_follow_evaluation_depth() {
+        let source = "def f(xs):\n    return [[z for z in x] for x in [y for y in xs] if x for q in [a for a in x] if q]\n";
+        assert_eq!(
+            score(source),
+            (
+                14,
+                vec![
+                    ("comprehension for", 3),
+                    ("comprehension for", 1),
+                    ("comprehension for", 1),
+                    ("comprehension if", 2),
+                    ("comprehension for", 2),
+                    ("comprehension for", 2),
+                    ("comprehension if", 3)
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn conditional_comments_do_not_change_branch_depth() {
+        let source = "def f(a,b,c):\n    return ((1 if a else 2)  # first branch\n            if b else (3 if c else 4)  # second branch\n           )\n";
+        assert_eq!(
+            score(source),
+            (
+                5,
+                vec![
+                    ("conditional expression", 1),
+                    ("conditional expression", 2),
+                    ("conditional expression", 2)
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn logical_runs_break_at_not_and_calls() {
+        assert_eq!(
+            score(
+                "def f(a,b,c,d):\n    return a and (b and c) or not (a or b) and call(c and d)\n"
+            ),
+            (
+                5,
+                vec![("and", 1), ("or", 1), ("and", 1), ("or", 1), ("and", 1)]
+            )
+        );
     }
 }

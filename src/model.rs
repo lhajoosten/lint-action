@@ -21,9 +21,11 @@ impl Rule {
                 language,
                 Language::Typescript | Language::Tsx | Language::Python
             ),
-            Self::CognitiveComplexity | Self::SourceDuplication => {
-                matches!(language, Language::Typescript | Language::Tsx)
-            }
+            Self::CognitiveComplexity => matches!(
+                language,
+                Language::Typescript | Language::Tsx | Language::Python
+            ),
+            Self::SourceDuplication => matches!(language, Language::Typescript | Language::Tsx),
         }
     }
 }

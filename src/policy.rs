@@ -107,7 +107,7 @@ impl Policy {
                 && self
                     .limits
                     .keys()
-                    .any(|language| Rule::CognitiveComplexity.supports(*language)))
+                    .any(|language| self.limit(*language, Rule::CognitiveComplexity).is_some()))
             || (self.active(Rule::SourceDuplication) && self.duplication_minimum.is_some())
             || (self.active(Rule::FinallyExit) && self.finally_exit)
     }
@@ -128,6 +128,9 @@ impl Policy {
         let cyclomatic_limit = self.limits.get(&language).copied()?;
         match rule {
             Rule::CyclomaticComplexity => Some(cyclomatic_limit),
+            Rule::CognitiveComplexity if language == Language::Python => {
+                self.cognitive_limits.get(&language).copied()
+            }
             Rule::CognitiveComplexity if rule.supports(language) => Some(
                 self.cognitive_limits
                     .get(&language)

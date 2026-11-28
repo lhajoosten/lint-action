@@ -43,5 +43,295 @@
       "diagnostics": []
     },
     "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {
+        "text": "{\"mode\": \"report-only\", \"limits\": {\"python\": 1}, \"cognitive_limits\": {\"python\": 1}}"
+      }
+    },
+    "args": [
+      "scan",
+      "--root",
+      "$TREE0"
+    ],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "guards.py",
+          "language": "python",
+          "scope": [
+            {
+              "kind": "function",
+              "name": "collect"
+            }
+          ],
+          "name": "collect",
+          "range": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 8,
+              "column": 22
+            }
+          },
+          "score": 10,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cognitive-complexity",
+          "path": "guards.py",
+          "language": "python",
+          "scope": [
+            {
+              "kind": "function",
+              "name": "collect"
+            }
+          ],
+          "name": "collect",
+          "range": {
+            "start": {
+              "line": 1,
+              "column": 1
+            },
+            "end": {
+              "line": 8,
+              "column": 22
+            }
+          },
+          "score": 16,
+          "contributions": [
+            {
+              "construct": "match",
+              "points": 1,
+              "nesting": 0,
+              "range": {
+                "start": {
+                  "line": 2,
+                  "column": 5
+                },
+                "end": {
+                  "line": 2,
+                  "column": 10
+                }
+              }
+            },
+            {
+              "construct": "pattern guard",
+              "points": 1,
+              "nesting": 0,
+              "range": {
+                "start": {
+                  "line": 3,
+                  "column": 29
+                },
+                "end": {
+                  "line": 3,
+                  "column": 31
+                }
+              }
+            },
+            {
+              "construct": "and",
+              "points": 1,
+              "nesting": 0,
+              "range": {
+                "start": {
+                  "line": 3,
+                  "column": 38
+                },
+                "end": {
+                  "line": 3,
+                  "column": 41
+                }
+              }
+            },
+            {
+              "construct": "or",
+              "points": 1,
+              "nesting": 0,
+              "range": {
+                "start": {
+                  "line": 3,
+                  "column": 48
+                },
+                "end": {
+                  "line": 3,
+                  "column": 50
+                }
+              }
+            },
+            {
+              "construct": "comprehension for",
+              "points": 3,
+              "nesting": 2,
+              "range": {
+                "start": {
+                  "line": 6,
+                  "column": 27
+                },
+                "end": {
+                  "line": 6,
+                  "column": 30
+                }
+              }
+            },
+            {
+              "construct": "comprehension if",
+              "points": 4,
+              "nesting": 3,
+              "range": {
+                "start": {
+                  "line": 6,
+                  "column": 45
+                },
+                "end": {
+                  "line": 6,
+                  "column": 47
+                }
+              }
+            },
+            {
+              "construct": "comprehension for",
+              "points": 2,
+              "nesting": 1,
+              "range": {
+                "start": {
+                  "line": 6,
+                  "column": 60
+                },
+                "end": {
+                  "line": 6,
+                  "column": 63
+                }
+              }
+            },
+            {
+              "construct": "comprehension if",
+              "points": 3,
+              "nesting": 2,
+              "range": {
+                "start": {
+                  "line": 6,
+                  "column": 78
+                },
+                "end": {
+                  "line": 6,
+                  "column": 80
+                }
+              }
+            }
+          ],
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "guards.py",
+          "language": "python",
+          "scope": [
+            {
+              "kind": "function",
+              "name": "collect"
+            },
+            {
+              "kind": "function",
+              "name": "keep"
+            }
+          ],
+          "name": "keep",
+          "range": {
+            "start": {
+              "line": 4,
+              "column": 13
+            },
+            "end": {
+              "line": 5,
+              "column": 58
+            }
+          },
+          "score": 3,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "cognitive-complexity",
+          "path": "guards.py",
+          "language": "python",
+          "scope": [
+            {
+              "kind": "function",
+              "name": "collect"
+            },
+            {
+              "kind": "function",
+              "name": "keep"
+            }
+          ],
+          "name": "keep",
+          "range": {
+            "start": {
+              "line": 4,
+              "column": 13
+            },
+            "end": {
+              "line": 5,
+              "column": 58
+            }
+          },
+          "score": 3,
+          "contributions": [
+            {
+              "construct": "comprehension for",
+              "points": 1,
+              "nesting": 0,
+              "range": {
+                "start": {
+                  "line": 5,
+                  "column": 33
+                },
+                "end": {
+                  "line": 5,
+                  "column": 36
+                }
+              }
+            },
+            {
+              "construct": "comprehension if",
+              "points": 2,
+              "nesting": 1,
+              "range": {
+                "start": {
+                  "line": 5,
+                  "column": 50
+                },
+                "end": {
+                  "line": 5,
+                  "column": 52
+                }
+              }
+            }
+          ],
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
   }
 ]
