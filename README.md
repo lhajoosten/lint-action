@@ -2,7 +2,7 @@
 
 <img width="2172" height="724" alt="image" src="https://github.com/user-attachments/assets/ce155939-1d71-4150-8afa-b5ba263b1e34" />
 
-A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, and cognitive complexity and opt-in source duplication in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
+A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, cognitive complexity in TypeScript, TSX, and opt-in Python, and opt-in source duplication in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
 
 ## Run locally
 
@@ -30,7 +30,7 @@ Create `.lint-action.json` at the source root. This example reports findings wit
 }
 ```
 
-Both complexity rules default to a limit of **12**. Omitting `limits` enables cyclomatic complexity in all supported languages. If supplied, `limits` selects the enabled languages and gives their cyclomatic limits. Cognitive complexity runs for enabled TypeScript and TSX. Set `cognitive_limits` to override either cognitive limit independently.
+Both complexity rules default to a limit of **12**. Omitting `limits` enables cyclomatic complexity in all supported languages. If supplied, `limits` selects the enabled languages and gives their cyclomatic limits. Cognitive complexity runs for enabled TypeScript and TSX. Set `cognitive_limits` to override either cognitive limit independently. To enable Python cognitive complexity, set `cognitive_limits.python` alongside `limits.python`; omitting it leaves Python cognitive analysis disabled.
 
 Set `severities` to override enforcement per stable rule ID. `pass` disables the rule, `warn` reports findings without blocking or using baseline exceptions, and `error` follows the configured mode. Missing entries retain the existing mode behavior, and severity does not enable a rule that is otherwise inactive.
 

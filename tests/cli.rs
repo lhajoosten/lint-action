@@ -456,3 +456,56 @@ fn scan_text_and_json_formats_follow_the_gate() {
     assert!(text.contains("invalid_config"), "{text}");
     assert!(text.contains("incomplete:"), "{text}");
 }
+
+#[test]
+fn python_cognitive_opt_in_threshold_severity_and_baseline() {
+    let root = tempfile::tempdir().unwrap();
+    let tools = common::without_python();
+    let dir = root.path();
+    let policy = dir.join(".lint-action.json");
+    let source = dir.join("example.py");
+    fs::write(&source, "def f(a, b):\n    if a:\n        if b: pass\n").unwrap();
+    let configure = |config: Value| fs::write(&policy, config.to_string()).unwrap();
+    let run = |command: &str| {
+        let output = common::command(&tools)
+            .args([command, "--root"])
+            .arg(dir)
+            .output()
+            .unwrap();
+        (
+            output.status.code().unwrap(),
+            serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        )
+    };
+    configure(json!({"mode":"strict", "limits":{"python":100}}));
+    assert!(run("scan").1["findings"].as_array().unwrap().is_empty());
+    assert!(run("baseline").1["entries"].as_array().unwrap().is_empty());
+    configure(json!({"mode":"strict", "limits":{"python":100}, "cognitive_limits":{"python":3}}));
+    assert!(run("scan").1["findings"].as_array().unwrap().is_empty());
+    configure(
+        json!({"mode":"strict", "limits":{"python":100}, "cognitive_limits":{"python":2}, "severities":{"cognitive-complexity":"warn"}}),
+    );
+    let (status, report) = run("scan");
+    assert_eq!(status, 0);
+    assert_eq!(report["findings"][0]["severity"], "warn");
+    assert_eq!(report["findings"][0]["status"], "reported");
+    configure(json!({"mode":"strict", "limits":{"python":100}, "cognitive_limits":{"python":2}}));
+    let (status, report) = run("scan");
+    assert_eq!(status, 1);
+    assert_eq!(report["findings"][0]["status"], "blocking");
+    let (_, baseline) = run("baseline");
+    fs::write(dir.join(".lint-action-baseline.json"), baseline.to_string()).unwrap();
+    configure(json!({"mode":"baseline", "limits":{"python":100}, "cognitive_limits":{"python":2}}));
+    let (status, report) = run("scan");
+    assert_eq!(status, 0);
+    assert_eq!(report["findings"][0]["status"], "baselined");
+    fs::write(
+        &source,
+        "def f(a, b):\n    if a:\n        if b:\n            if a: pass\n",
+    )
+    .unwrap();
+    let (status, report) = run("scan");
+    assert_eq!(status, 1);
+    assert_eq!(report["findings"][0]["status"], "blocking");
+    assert_eq!(report["findings"][0]["score"], 6);
+}
