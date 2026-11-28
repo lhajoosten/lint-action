@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "producer": "3d8396d8b20db120b44a97d4e917dfe6e8d80760",
+  "publishImage": false,
+  "repository": "lhajoosten/lint-gate",
+  "branch": "main",
+  "baseline": "6428fafe869e14013fecec735374053f408ca452",
+  "source": "80d14491f6d6501cf709f4fbae78ec8d2880a5ce",
+  "previousVersion": "0.1.1",
+  "changes": [
+    {
+      "number": 27,
+      "title": "docs: add a Lint Gate banner to the README",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 31,
+      "title": "feat(pr-feedback): publish advisory Lint Gate checks with a GitHub App",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 32,
+      "title": "ci(release): verify tagged releases for GitHub Marketplace",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 34,
+      "title": "feat(policy): configure per-rule severity",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 35,
+      "title": "ci(lint-gate): restore the App pilot with a pinned reusable scanner",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 36,
+      "title": "feat: propose safe baseline reductions",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 39,
+      "title": "test: cover interacting syntax in CLI fixtures",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 40,
+      "title": "feat(report): compare lint findings across pull requests",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 41,
+      "title": "ci(release): validate Conventional Commit PR titles",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 42,
+      "title": "feat(pr-feedback): publish severity-aware review conversations",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 44,
+      "title": "refactor(github): port GitHub tooling to Rust",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 45,
+      "title": "fix(github): enable blocking lint conversations",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 58,
+      "title": "fix(github): reconcile denied review-thread resolutions",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 59,
+      "title": "feat(rules): flag control flow that exits finally blocks",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 60,
+      "title": "test(duplication): benchmark exact pairs on pinned and repetitive inputs",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 61,
+      "title": "feat(cli): add actionable terminal scan reports",
+      "author": "lhajoosten",
+      "requiredAction": null
+    },
+    {
+      "number": 62,
+      "title": "ci(release): prepare the Rolling Release v0.10.0 cutover",
+      "author": "lhajoosten",
+      "requiredAction": null
+    }
+  ],
+  "version": "0.2.0",
+  "files": [
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "2d1d9bfb62191a155f6ce6b8bf26622c2f6ecccd4a1b86765c2b4b977edc282a"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "5fb227af0cf04fcb0bbfd5742dfe3b2dbb855399c2218e741cb5249ec7c5857b"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "5a343569bad6d02d72a729f6e59b9d34554e18b352f000f49a6657da4fecb589"
+    }
+  ]
+}
