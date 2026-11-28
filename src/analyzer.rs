@@ -20,16 +20,27 @@ struct Frame {
     depth: u32,
 }
 
+pub struct AnalysisOptions {
+    pub duplication_budget: Option<(usize, usize)>,
+    pub cyclomatic_enabled: bool,
+    pub cognitive_enabled: bool,
+    pub finally_enabled: bool,
+    pub empty_handler_enabled: bool,
+}
+
 pub fn analyze(
     path: &str,
     language: Language,
     source: &str,
-    duplication_budget: Option<(usize, usize)>,
-    cyclomatic_enabled: bool,
-    cognitive_enabled: bool,
-    finally_enabled: bool,
-    empty_handler_enabled: bool,
+    options: AnalysisOptions,
 ) -> Result<Analysis, Diagnostic> {
+    let AnalysisOptions {
+        duplication_budget,
+        cyclomatic_enabled,
+        cognitive_enabled,
+        finally_enabled,
+        empty_handler_enabled,
+    } = options;
     let parser_error =
         |message: &str| Diagnostic::new(ErrorKind::ParseError, Some(path.to_owned()), message);
     let mut parser = Parser::new();

@@ -13,6 +13,13 @@ cargo install --path . --locked
 lint-gate scan --root /path/to/project
 ```
 
+For a concise local report, use `lint-gate scan --root /path/to/project --format text`. JSON remains the default; both formats use the same exit codes. For example:
+
+```text
+src/example.ts:4:1: blocking cyclomatic-complexity: score 14, limit 12 (example)
+blocked: 1 file(s) scanned, 0 skipped
+```
+
 Create `.lint-action.json` at the source root. This example reports findings without enforcing the limits.
 
 ```json

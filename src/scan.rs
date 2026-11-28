@@ -1,4 +1,4 @@
-use crate::analyzer::{Analysis, analyze};
+use crate::analyzer::{Analysis, AnalysisOptions, analyze};
 use crate::duplication;
 use crate::grammar::Language;
 use crate::model::{Diagnostic, ErrorKind, Rule};
@@ -226,11 +226,13 @@ fn scan_file(
         &path,
         language,
         source,
-        budget,
-        policy.active_for(language, Rule::CyclomaticComplexity),
-        policy.active_for(language, Rule::CognitiveComplexity),
-        policy.active_for(language, Rule::FinallyExit),
-        policy.active_for(language, Rule::EmptyHandler),
+        AnalysisOptions {
+            duplication_budget: budget,
+            cyclomatic_enabled: policy.active_for(language, Rule::CyclomaticComplexity),
+            cognitive_enabled: policy.active_for(language, Rule::CognitiveComplexity),
+            finally_enabled: policy.active_for(language, Rule::FinallyExit),
+            empty_handler_enabled: policy.active_for(language, Rule::EmptyHandler),
+        },
     )
     .map(Some)
 }
