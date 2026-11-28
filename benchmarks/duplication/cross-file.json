@@ -1,0 +1,407 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {
+        "text": "{\"mode\":\"report-only\",\"limits\":{},\"duplication\":{\"minimum_tokens\":20}}"
+      },
+      "$TREE0/a.ts": {
+        "prefix": "function first() {",
+        "repeat": "ping();",
+        "count": 30,
+        "suffix": "}"
+      },
+      "$TREE0/b.ts": {
+        "prefix": "function second() {",
+        "repeat": "ping();",
+        "count": 30,
+        "suffix": "}"
+      }
+    },
+    "args": [
+      "scan",
+      "--root",
+      "$TREE0"
+    ],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 28,
+          "occurrences": [
+            {
+              "path": "a.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 19
+                },
+                "end": {
+                  "line": 1,
+                  "column": 68
+                }
+              }
+            },
+            {
+              "path": "a.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 68
+                },
+                "end": {
+                  "line": 1,
+                  "column": 117
+                }
+              }
+            }
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 60,
+          "occurrences": [
+            {
+              "path": "a.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 19
+                },
+                "end": {
+                  "line": 1,
+                  "column": 124
+                }
+              }
+            },
+            {
+              "path": "a.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 124
+                },
+                "end": {
+                  "line": 1,
+                  "column": 229
+                }
+              }
+            }
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 120,
+          "occurrences": [
+            {
+              "path": "a.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 19
+                },
+                "end": {
+                  "line": 1,
+                  "column": 229
+                }
+              }
+            },
+            {
+              "path": "b.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 20
+                },
+                "end": {
+                  "line": 1,
+                  "column": 230
+                }
+              }
+            }
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 28,
+          "occurrences": [
+            {
+              "path": "b.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 20
+                },
+                "end": {
+                  "line": 1,
+                  "column": 69
+                }
+              }
+            },
+            {
+              "path": "b.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 69
+                },
+                "end": {
+                  "line": 1,
+                  "column": 118
+                }
+              }
+            }
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 60,
+          "occurrences": [
+            {
+              "path": "b.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 20
+                },
+                "end": {
+                  "line": 1,
+                  "column": 125
+                }
+              }
+            },
+            {
+              "path": "b.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 125
+                },
+                "end": {
+                  "line": 1,
+                  "column": 230
+                }
+              }
+            }
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {
+        "text": "{\"mode\": \"report-only\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 10}}"
+      },
+      "$TREE0/a.ts": {
+        "text": "function first() { prepare(item); send(item); cleanup(item); }"
+      },
+      "$TREE0/b.ts": {
+        "text": "function second() { prepare(item); send(item); cleanup(item); }"
+      }
+    },
+    "args": [
+      "scan",
+      "--root",
+      "$TREE0"
+    ],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 15,
+          "occurrences": [
+            {
+              "path": "a.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 20
+                },
+                "end": {
+                  "line": 1,
+                  "column": 61
+                }
+              }
+            },
+            {
+              "path": "b.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 21
+                },
+                "end": {
+                  "line": 1,
+                  "column": 62
+                }
+              }
+            }
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/c.ts": {
+        "text": "function third() { send(item); cleanup(item); }"
+      }
+    },
+    "args": [
+      "scan",
+      "--root",
+      "$TREE0"
+    ],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 3,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 15,
+          "occurrences": [
+            {
+              "path": "a.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 20
+                },
+                "end": {
+                  "line": 1,
+                  "column": 61
+                }
+              }
+            },
+            {
+              "path": "b.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 21
+                },
+                "end": {
+                  "line": 1,
+                  "column": 62
+                }
+              }
+            }
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {
+              "path": "a.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 35
+                },
+                "end": {
+                  "line": 1,
+                  "column": 61
+                }
+              }
+            },
+            {
+              "path": "c.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 20
+                },
+                "end": {
+                  "line": 1,
+                  "column": 46
+                }
+              }
+            }
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {
+              "path": "b.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 36
+                },
+                "end": {
+                  "line": 1,
+                  "column": 62
+                }
+              }
+            },
+            {
+              "path": "c.ts",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "column": 20
+                },
+                "end": {
+                  "line": 1,
+                  "column": 46
+                }
+              }
+            }
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  }
+]
