@@ -31,7 +31,7 @@ jobs:
           "repositoryId": 1466479881,
           "releaseBranch": "main",
           "releasePolicy": "release-policy-v2",
-          "contextPolicy": "required",
+          "contextPolicy": "optional",
           "githubRelease": true,
           "changelog": {
             "verbosity": "concise",
