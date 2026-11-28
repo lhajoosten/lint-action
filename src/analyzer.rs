@@ -19,14 +19,19 @@ struct Frame {
     depth: u32,
 }
 
+pub struct Enabled {
+    pub cyclomatic: bool,
+    pub cognitive: bool,
+    pub lines: bool,
+    pub finally: bool,
+}
+
 pub fn analyze(
     path: &str,
     language: Language,
     source: &str,
     duplication_budget: Option<(usize, usize)>,
-    cyclomatic_enabled: bool,
-    cognitive_enabled: bool,
-    finally_enabled: bool,
+    enabled: Enabled,
 ) -> Result<Analysis, Diagnostic> {
     let parser_error =
         |message: &str| Diagnostic::new(ErrorKind::ParseError, Some(path.to_owned()), message);
@@ -41,7 +46,7 @@ pub fn analyze(
     let mut result = Analysis::default();
     let mut duplicate_source = duplication_budget.map(|_| duplication::Source::new(path));
     let mut scope = Vec::<Scope>::new();
-    let cognitive = cognitive_enabled && Rule::CognitiveComplexity.supports(language);
+    let cognitive = enabled.cognitive && Rule::CognitiveComplexity.supports(language);
     let mut active = Vec::<Frame>::new();
     let mut entries = Vec::new();
     let mut ancestors = Vec::new();
@@ -64,7 +69,6 @@ pub fn analyze(
         let new_scope = callable.or_else(|| language.container(node, source));
         let entered_scope = new_scope.is_some();
         if let Some(new_scope) = new_scope {
-            let name = new_scope.name.clone();
             scope.push(new_scope);
             let identity = Identity {
                 path: path.to_owned(),
@@ -76,14 +80,14 @@ pub fn analyze(
                 active.push(register_callable(
                     &mut result.callables,
                     &identity,
-                    &name,
                     node,
-                    cyclomatic_enabled,
+                    &enabled,
                     cognitive,
+                    source,
                 ));
             }
         }
-        if finally_enabled {
+        if enabled.finally {
             collect_finally(
                 &mut result.finally_exits,
                 path,
@@ -96,7 +100,7 @@ pub fn analyze(
         }
         let mut nested = false;
         if let Some(frame) = active.last_mut() {
-            if cyclomatic_enabled {
+            if enabled.cyclomatic {
                 result.callables[frame.cyclomatic_index].score +=
                     u64::from(decision_points(language, node));
             }
@@ -182,32 +186,40 @@ fn decision_points(language: Language, node: Node<'_>) -> u32 {
 fn register_callable(
     callables: &mut Vec<Callable>,
     identity: &Identity,
-    name: &str,
     node: Node<'_>,
-    cyclomatic: bool,
+    enabled: &Enabled,
     cognitive: bool,
+    source: &str,
 ) -> Frame {
     let base = callables.len();
-    for rule in [Rule::CyclomaticComplexity, Rule::CognitiveComplexity]
-        .into_iter()
-        .filter(|rule| match rule {
-            Rule::CyclomaticComplexity => cyclomatic,
-            Rule::CognitiveComplexity => cognitive,
-            Rule::SourceDuplication | Rule::FinallyExit => false,
-        })
-    {
+    for rule in [
+        Rule::CyclomaticComplexity,
+        Rule::CognitiveComplexity,
+        Rule::CallableLines,
+    ]
+    .into_iter()
+    .filter(|rule| match rule {
+        Rule::CyclomaticComplexity => enabled.cyclomatic,
+        Rule::CognitiveComplexity => cognitive,
+        Rule::CallableLines => enabled.lines,
+        Rule::SourceDuplication | Rule::FinallyExit => false,
+    }) {
         callables.push(Callable {
             rule,
             identity: identity.clone(),
-            name: name.to_owned(),
+            name: identity.scope.last().expect("callable scope").name.clone(),
             range: node.range().into(),
-            score: u64::from(rule == Rule::CyclomaticComplexity),
+            score: if rule == Rule::CallableLines {
+                callable_lines(node, identity.language, source)
+            } else {
+                u64::from(rule == Rule::CyclomaticComplexity)
+            },
             contributions: Vec::new(),
         });
     }
     Frame {
-        cyclomatic_index: base + usize::from(!cyclomatic),
-        cognitive_index: cognitive.then_some(base + usize::from(cyclomatic)),
+        cyclomatic_index: base + usize::from(!enabled.cyclomatic),
+        cognitive_index: cognitive.then_some(base + usize::from(enabled.cyclomatic)),
         depth: 0,
     }
 }
@@ -231,4 +243,36 @@ fn collect_finally(
             message: "Control flow leaving finally can suppress an exception or override an earlier return.",
         });
     }
+}
+
+// Only tokens in the body belong to this callable; nested callables own their bodies.
+fn callable_lines(node: Node<'_>, language: Language, source: &str) -> u64 {
+    let Some(body) = node.child_by_field_name("body") else {
+        return 0;
+    };
+    let mut rows = std::collections::BTreeSet::new();
+    let mut stack = vec![body];
+    while let Some(current) = stack.pop() {
+        if current != body && language.callable(current, source).is_some() {
+            continue;
+        }
+        if matches!(current.kind(), "comment" | "line_comment" | "block_comment") {
+            continue;
+        }
+        if current.child_count() == 0 {
+            if matches!(current.kind(), "{" | "}") {
+                continue;
+            }
+            let text = &source[current.byte_range()];
+            for (offset, line) in text.split('\n').enumerate() {
+                if !line.trim().is_empty() {
+                    rows.insert(current.start_position().row + offset);
+                }
+            }
+        } else {
+            let mut cursor = current.walk();
+            stack.extend(current.children(&mut cursor));
+        }
+    }
+    rows.len() as u64
 }

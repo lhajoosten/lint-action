@@ -41,6 +41,8 @@ struct Config {
     #[serde(default)]
     cognitive_limits: BTreeMap<Language, u32>,
     #[serde(default)]
+    callable_line_limits: BTreeMap<Language, u32>,
+    #[serde(default)]
     duplication: Option<DuplicationConfig>,
     #[serde(default)]
     finally_exit: bool,
@@ -68,6 +70,7 @@ pub struct Policy {
     pub finally_exit: bool,
     limits: BTreeMap<Language, u32>,
     cognitive_limits: BTreeMap<Language, u32>,
+    callable_line_limits: BTreeMap<Language, u32>,
     include: GlobSet,
     exclude: GlobSet,
 }
@@ -85,6 +88,7 @@ impl Policy {
             finally_exit: config.finally_exit,
             limits: config.limits,
             cognitive_limits: config.cognitive_limits,
+            callable_line_limits: config.callable_line_limits,
             include: compile_globs(&config.include).map_err(invalid)?,
             exclude: compile_globs(&config.exclude).map_err(invalid)?,
         })
@@ -102,7 +106,8 @@ impl Policy {
     }
 
     pub fn any_active(&self) -> bool {
-        (self.active(Rule::CyclomaticComplexity) && !self.limits.is_empty())
+        (self.active(Rule::CallableLines) && !self.callable_line_limits.is_empty())
+            || (self.active(Rule::CyclomaticComplexity) && !self.limits.is_empty())
             || (self.active(Rule::CognitiveComplexity)
                 && self
                     .limits
@@ -116,6 +121,7 @@ impl Policy {
         self.active(rule)
             && match rule {
                 Rule::CyclomaticComplexity => self.limits.contains_key(&language),
+                Rule::CallableLines => self.callable_line_limits.contains_key(&language),
                 Rule::CognitiveComplexity => self.limit(language, rule).is_some(),
                 Rule::FinallyExit => self.finally_exit && rule.supports(language),
                 Rule::SourceDuplication => {
@@ -125,21 +131,26 @@ impl Policy {
     }
 
     pub fn limit(&self, language: Language, rule: Rule) -> Option<u32> {
-        let cyclomatic_limit = self.limits.get(&language).copied()?;
         match rule {
-            Rule::CyclomaticComplexity => Some(cyclomatic_limit),
-            Rule::CognitiveComplexity if rule.supports(language) => Some(
-                self.cognitive_limits
-                    .get(&language)
-                    .copied()
-                    .unwrap_or(DEFAULT_LIMIT),
-            ),
+            Rule::CallableLines => self.callable_line_limits.get(&language).copied(),
+            Rule::CyclomaticComplexity => self.limits.get(&language).copied(),
+            Rule::CognitiveComplexity
+                if rule.supports(language) && self.limits.contains_key(&language) =>
+            {
+                Some(
+                    self.cognitive_limits
+                        .get(&language)
+                        .copied()
+                        .unwrap_or(DEFAULT_LIMIT),
+                )
+            }
             Rule::CognitiveComplexity | Rule::SourceDuplication | Rule::FinallyExit => None,
         }
     }
 
     pub fn selects(&self, language: Language) -> bool {
         self.limits.contains_key(&language)
+            || self.callable_line_limits.contains_key(&language)
             || (self.finally_exit && Rule::FinallyExit.supports(language))
             || (self.duplication_minimum.is_some() && Rule::SourceDuplication.supports(language))
     }
@@ -165,10 +176,20 @@ fn validate_config(config: &Config, duplication_minimum: Option<u32>) -> Result<
     if duplication_minimum == Some(0) {
         return Err("duplication.minimum_tokens must be positive".into());
     }
-    if (config.limits.is_empty() && duplication_minimum.is_none() && !config.finally_exit)
+    if (config.limits.is_empty()
+        && config.callable_line_limits.is_empty()
+        && duplication_minimum.is_none()
+        && !config.finally_exit)
         || config.limits.values().any(|&limit| limit == 0)
     {
         return Err("limits must enable at least one language and be positive".into());
+    }
+    if config
+        .callable_line_limits
+        .values()
+        .any(|&limit| limit == 0)
+    {
+        return Err("callable_line_limits must be positive".into());
     }
     if config.cognitive_limits.iter().any(|(&language, &limit)| {
         limit == 0
