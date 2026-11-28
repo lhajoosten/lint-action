@@ -361,3 +361,98 @@ fn compare_finally_exits_under_base_policy() {
         assert!(change[side].get("score").is_none() && change.get("limit").is_none());
     }
 }
+
+#[test]
+fn scan_text_and_json_formats_follow_the_gate() {
+    let tools = common::without_python();
+    let tree = tempfile::tempdir().unwrap();
+    let root = tree.path();
+    let policy = root.join(".lint-action.json");
+    let run = |args: &[&str]| {
+        common::command(&tools)
+            .args(["scan", "--root"])
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let check = |expected| {
+        let default = run(&[]);
+        let json = run(&["--format", "json"]);
+        let text = run(&["--format", "text"]);
+        assert_eq!(default.status.code(), Some(expected));
+        assert_eq!(json.status.code(), Some(expected));
+        assert_eq!(text.status.code(), Some(expected));
+        assert_eq!(default.stdout, json.stdout);
+        let _: Value = serde_json::from_slice(&json.stdout).unwrap();
+        assert!(text.stderr.is_empty());
+        assert!(!text.stdout.contains(&0x1b));
+        String::from_utf8(text.stdout).unwrap()
+    };
+
+    fs::write(&policy, r#"{"mode":"strict","limits":{"typescript":1}}"#).unwrap();
+    fs::write(root.join("a.ts"), "function a() { return 1; }\n").unwrap();
+    assert!(check(0).contains("passed: 1 file(s) scanned"));
+
+    let source =
+        "function a(x: number) {\n if (x) {\n  if (x > 1) { return x; }\n }\n return 0;\n}\n";
+    fs::write(root.join("a.ts"), source).unwrap();
+    let baseline = common::command(&tools)
+        .args(["baseline", "--root"])
+        .arg(root)
+        .output()
+        .unwrap();
+    assert!(baseline.status.success());
+    fs::write(root.join(".lint-action-baseline.json"), baseline.stdout).unwrap();
+    fs::write(&policy, r#"{"mode":"baseline","limits":{"typescript":1},"cognitive_limits":{"typescript":1},"duplication":{"minimum_tokens":10},"finally_exit":true,"severities":{"cognitive-complexity":"warn"}}"#).unwrap();
+    fs::write(
+        root.join("b.ts"),
+        source.replace("function a", "function b"),
+    )
+    .unwrap();
+    fs::write(
+        root.join("c.ts"),
+        "function c() { try { run(); } finally { return 42; } }\n",
+    )
+    .unwrap();
+    let text = check(1);
+    assert!(
+        text.find("blocking").unwrap() < text.find("baselined").unwrap(),
+        "{text}"
+    );
+    assert!(
+        text.contains("a.ts:1:1: baselined cyclomatic-complexity: score"),
+        "{text}"
+    );
+    assert!(
+        text.contains("advisory cognitive-complexity: score"),
+        "{text}"
+    );
+    assert!(text.contains("line 3: if +2"), "{text}");
+    assert!(
+        text.contains("blocking source-duplication: score"),
+        "{text}"
+    );
+    assert!(text.contains("duplicate: b.ts:"), "{text}");
+    assert!(text.contains("blocking finally-exit:"), "{text}");
+    assert!(text.contains("suppress an exception"), "{text}");
+    assert!(text.contains("blocked: 3 file(s) scanned"), "{text}");
+
+    fs::write(root.join("bad.ts"), "function {\n").unwrap();
+    let text = check(2);
+    assert!(text.contains("diagnostic bad.ts:"), "{text}");
+    assert!(text.contains("parse_error"), "{text}");
+    assert!(text.contains("incomplete:"), "{text}");
+
+    #[cfg(unix)]
+    {
+        fs::remove_file(root.join("bad.ts")).unwrap();
+        fs::write(root.join("bad\u{1b}[31m.ts"), "function {\n").unwrap();
+        let text = check(2);
+        assert!(text.contains(r"bad\u{1b}[31m.ts"), "{text}");
+    }
+    fs::write(&policy, "invalid").unwrap();
+    let text = check(2);
+    assert!(text.contains("invalid_config"), "{text}");
+    assert!(text.contains("incomplete:"), "{text}");
+}

@@ -8,6 +8,7 @@ mod grammar;
 mod model;
 mod policy;
 mod scan;
+mod text;
 
 use crate::analyzer::Analysis;
 use crate::duplication::{Duplication, Match, Pair};
@@ -16,7 +17,7 @@ use crate::model::{
     Callable, Diagnostic, ErrorKind, FinallyExit, Identity, Position, Rule, SCORING_VERSION,
 };
 use crate::policy::{BASELINE_FILE, Baseline, BaselineScores, CONFIG_FILE, Mode, Policy, Severity};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -35,8 +36,11 @@ enum Command {
     #[command(flatten)]
     Github(GithubCommand),
 
-    /// Scan source and write the complete JSON report to stdout.
+    /// Scan source and write a report to stdout.
     Scan {
+        /// Output format (JSON is the default).
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
         #[command(flatten)]
         settings: Settings,
         /// Optional files or directories relative to the scan root.
@@ -73,6 +77,12 @@ enum Command {
         #[command(flatten)]
         settings: Settings,
     },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum OutputFormat {
+    Json,
+    Text,
 }
 
 #[derive(Subcommand)]
@@ -771,9 +781,15 @@ fn write_json(mut output: impl Write, value: &impl Serialize) -> io::Result<()> 
 
 fn run(command: Command) -> io::Result<u8> {
     let mut report = Report::new();
+    let mut format = OutputFormat::Json;
     match command {
         Command::Github(command) => return Ok(run_github(command)),
-        Command::Scan { settings, paths } => {
+        Command::Scan {
+            settings,
+            paths,
+            format: selected,
+        } => {
+            format = selected;
             if let Err(diagnostic) = scan(&settings, &paths, &mut report, false) {
                 report.diagnostics.push(diagnostic);
             }
@@ -801,7 +817,10 @@ fn run(command: Command) -> io::Result<u8> {
         Command::Baseline { input, paths } => return baseline_output(input, paths),
         Command::BaselineReview { settings } => return review_output(settings),
     }
-    write_json(io::stdout().lock(), &report)?;
+    match format {
+        OutputFormat::Json => write_json(io::stdout().lock(), &report)?,
+        OutputFormat::Text => text::write(io::stdout().lock(), &report)?,
+    }
     Ok(report.status())
 }
 
@@ -854,10 +873,19 @@ fn review_output(settings: Settings) -> io::Result<u8> {
 }
 
 fn main() -> ExitCode {
-    match run(Cli::parse().command) {
+    let command = Cli::parse().command;
+    let text_output = matches!(
+        &command,
+        Command::Scan {
+            format: OutputFormat::Text,
+            ..
+        }
+    );
+    match run(command) {
         Ok(status) => status.into(),
         Err(error) => {
-            eprintln!("lint-gate: could not write JSON: {error}");
+            let format = if text_output { "text" } else { "JSON" };
+            eprintln!("lint-gate: could not write {format}: {error}");
             2.into()
         }
     }
