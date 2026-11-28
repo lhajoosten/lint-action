@@ -177,7 +177,6 @@ fn publish() -> Result<String> {
     let findings = evidence::findings(&report).ok_or(Error::Metadata)?;
     let manifest = verified_manifest(&target, findings)?;
     publish_evidence(
-        &api,
         &base_url,
         &config,
         &target,
@@ -188,7 +187,6 @@ fn publish() -> Result<String> {
 }
 
 fn publish_evidence(
-    api: &GitHub,
     base_url: &str,
     config: &Config,
     target: &Target,
@@ -196,15 +194,16 @@ fn publish_evidence(
     manifest: &evidence::Manifest,
     findings: &[Value],
 ) -> Result<String> {
+    let writes = GitHub::new(base_url, &config.repository, required("APP_TOKEN")?);
     let slug = optional("APP_SLUG");
     let actor = slug
         .as_deref()
-        .map(|slug| verified_app_actor(api, slug))
+        .map(|slug| verified_app_actor(&writes, slug))
         .transpose()?;
-    let writes = GitHub::new(base_url, &config.repository, required("APP_TOKEN")?);
     let publication = Publication {
         writes: &writes,
         repository: &config.repository,
+        repository_url: &config.repository_url,
         target,
         verify: verify_current,
         paths: &manifest.compatible_paths,
@@ -408,12 +407,10 @@ fn graphql(api: &GitHub, query: &str, variables: Value) -> Result<Value> {
         .as_array()
         .filter(|items| !items.is_empty())
     {
-        if errors.iter().any(|error| {
-            error["extensions"]["type"] == "FORBIDDEN"
-                || error["message"]
-                    .as_str()
-                    .is_some_and(|message| message.to_ascii_lowercase().contains("not accessible"))
-        }) {
+        if errors
+            .iter()
+            .all(|error| error["type"] == "FORBIDDEN" || error["extensions"]["type"] == "FORBIDDEN")
+        {
             return Err(Error::Status {
                 operation: "review-thread operation".to_owned(),
                 status: 403,
@@ -424,9 +421,26 @@ fn graphql(api: &GitHub, query: &str, variables: Value) -> Result<Value> {
     response.get("data").cloned().ok_or(Error::Metadata)
 }
 
+fn thread_error(operation: &str, actor: &str, error: Error) -> Error {
+    let detail = match error {
+        Error::Status { operation, status } => Error::status_message(&operation, status),
+        Error::Network => "GitHub could not be reached.".to_owned(),
+        _ => "GitHub returned an error or unexpected metadata.".to_owned(),
+    };
+    let manual = if operation.starts_with("resolve mutation") {
+        " A reviewer can resolve this obsolete thread manually, then rerun the publisher."
+    } else {
+        ""
+    };
+    Error::Diagnostic(format!(
+        "Review-thread {operation} failed for {actor}. {detail} Verify the App installation's Pull requests write permission and thread capability.{manual}"
+    ))
+}
+
 struct Publication<'a> {
     writes: &'a GitHub,
     repository: &'a str,
+    repository_url: &'a str,
     target: &'a Target,
     verify: &'a dyn Fn() -> Result<()>,
     paths: &'a BTreeSet<String>,
@@ -445,9 +459,16 @@ struct Feedback<'a, 'b> {
     review_path: &'a str,
     count: usize,
     summary: &'a mut Summary<'b>,
+    manual: &'a mut Vec<u64>,
 }
 
 impl Publication<'_> {
+    fn actor_name(&self) -> String {
+        self.actor.as_ref().map_or_else(
+            || format!("App ID {} (bot identity unavailable)", self.app_id),
+            |(login, id)| format!("{login} (bot ID {id}, App ID {})", self.app_id),
+        )
+    }
     fn owns(&self, comment: &Value) -> bool {
         comment["performed_via_github_app"]["id"] == self.app_id
             || self.actor.as_ref().is_some_and(|(login, id)| {
@@ -467,7 +488,7 @@ impl Publication<'_> {
         let query = "query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
           repository(owner:$owner, name:$name) { pullRequest(number:$number) {
             reviewThreads(first:100, after:$cursor) {
-              nodes { id isResolved comments(first:100) { nodes { databaseId } } }
+              nodes { id isResolved viewerCanResolve viewerCanUnresolve comments(first:100) { nodes { databaseId } } }
               pageInfo { hasNextPage endCursor }
             }
           }}
@@ -479,7 +500,7 @@ impl Publication<'_> {
                 self.writes,
                 query,
                 json!({"owner": owner, "name": name, "number": self.target.candidate.number, "cursor": cursor}),
-            )?;
+            ).map_err(|error| thread_error("query", &self.actor_name(), error))?;
             let connection = &data["repository"]["pullRequest"]["reviewThreads"];
             threads.extend(
                 connection["nodes"]
@@ -499,19 +520,72 @@ impl Publication<'_> {
         Err(Error::Metadata)
     }
 
-    fn resolve(&self, thread: &Value, resolved: bool) -> Result<()> {
+    fn resolve(&self, thread: &Value, resolved: bool) -> Result<bool> {
         (self.verify)()?;
+        let id = thread["id"].as_str().ok_or(Error::Metadata)?;
+        let action = if resolved { "resolve" } else { "reopen" };
+        let capability = if resolved {
+            "viewerCanResolve"
+        } else {
+            "viewerCanUnresolve"
+        };
+        let actor = self.actor_name();
+        let allowed = thread[capability].as_bool().ok_or_else(|| {
+            Error::Diagnostic(format!(
+                "Review-thread {action} capability is unavailable for thread {id} and {actor}."
+            ))
+        })?;
+        println!("Review-thread {action}: thread {id}, actor {actor}, {capability}={allowed}.");
+        if !allowed {
+            if resolved {
+                println!(
+                    "Review-thread resolve denied for thread {id}; manual resolution is required."
+                );
+                return Ok(false);
+            }
+            return Err(Error::Diagnostic(format!(
+                "Review-thread {action} denied for thread {id} and {actor}: {capability}=false. A reviewer can reopen this thread manually, then rerun the publisher."
+            )));
+        }
+        self.mutate_thread(id, resolved, &actor)
+    }
+
+    fn mutate_thread(&self, id: &str, resolved: bool, actor: &str) -> Result<bool> {
         let operation = if resolved {
             "resolveReviewThread"
         } else {
             "unresolveReviewThread"
         };
-        let id = thread["id"].as_str().ok_or(Error::Metadata)?;
+        let action = if resolved { "resolve" } else { "reopen" };
         let query = format!(
             "mutation($id:ID!) {{ {operation}(input:{{threadId:$id}}) {{ thread {{ id isResolved }} }} }}"
         );
-        graphql(self.writes, &query, json!({"id": id}))?;
-        Ok(())
+        let result = match graphql(self.writes, &query, json!({"id": id})) {
+            Err(Error::Status { status: 403, .. }) if resolved => {
+                println!(
+                    "GitHub denied the resolve mutation for thread {id}. Manual resolution is required."
+                );
+                return Ok(false);
+            }
+            Err(error) => {
+                return Err(thread_error(
+                    &format!("{action} mutation for thread {id}"),
+                    actor,
+                    error,
+                ));
+            }
+            Ok(result) => result,
+        };
+        if result[operation]["thread"]["id"] != id
+            || result[operation]["thread"]["isResolved"] != resolved
+        {
+            return Err(thread_error(
+                &format!("{action} mutation for thread {id}"),
+                actor,
+                Error::Metadata,
+            ));
+        }
+        Ok(true)
     }
 
     fn reserve_summary(
@@ -655,13 +729,36 @@ impl Publication<'_> {
                 }
                 return Ok(());
             }
-            if !resolved(thread) {
-                self.resolve(thread, true)?;
-                feedback.count -= 1;
+            if !self.retire_moved_thread(thread, existing, finding, feedback)? {
+                return Ok(());
             }
         }
         self.post_finding(identity, finding, anchor, feedback)?;
         Ok(())
+    }
+
+    fn retire_moved_thread<'a>(
+        &self,
+        thread: &Value,
+        existing: &Value,
+        finding: &'a Value,
+        feedback: &mut Feedback<'_, 'a>,
+    ) -> Result<bool> {
+        if resolved(thread) {
+            return Ok(true);
+        }
+        if !self.resolve(thread, true)? {
+            feedback
+                .manual
+                .push(existing["id"].as_u64().ok_or(Error::Metadata)?);
+            feedback.summary.push((
+                "Blocking error (resolve obsolete thread to update)",
+                finding,
+            ));
+            return Ok(false);
+        }
+        feedback.count -= 1;
+        Ok(true)
     }
 
     fn finish_reconciliation(
@@ -671,13 +768,23 @@ impl Publication<'_> {
         order_marker: &str,
         summary_id: u64,
         summary: &[(&str, &Value)],
+        manual: &mut Vec<u64>,
     ) -> Result<()> {
-        for (identity, (thread, _)) in active {
-            if !blockers.contains(identity) && !resolved(thread) {
-                self.resolve(thread, true)?;
+        for (identity, (thread, comment)) in active {
+            if !blockers.contains(identity) && !resolved(thread) && !self.resolve(thread, true)? {
+                manual.push(comment["id"].as_u64().ok_or(Error::Metadata)?);
             }
         }
-        let text = summary_body(order_marker, &self.target.details_url, summary);
+        let text = summary_body(
+            order_marker,
+            &self.target.details_url,
+            summary,
+            manual,
+            &format!(
+                "{}/pull/{}",
+                self.repository_url, self.target.candidate.number
+            ),
+        );
         self.send(
             &format!("/issues/comments/{summary_id}"),
             "PATCH",
@@ -729,6 +836,7 @@ impl Publication<'_> {
             .count();
         let hunk = Regex::new(r"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@").unwrap();
 
+        let mut manual = Vec::new();
         let mut feedback = Feedback {
             files: &files,
             hunk: &hunk,
@@ -737,11 +845,19 @@ impl Publication<'_> {
             review_path: &review_path,
             count,
             summary: &mut summary,
+            manual: &mut manual,
         };
         for (identity, finding) in &blocking {
             self.reconcile_finding(identity, finding, &mut feedback)?;
         }
-        self.finish_reconciliation(active, &blockers, &order_marker, summary_id, &summary)?;
+        self.finish_reconciliation(
+            active,
+            &blockers,
+            &order_marker,
+            summary_id,
+            &summary,
+            &mut manual,
+        )?;
         Ok(())
     }
 }
@@ -843,7 +959,13 @@ fn finding_detail(finding: &Value) -> String {
     }
 }
 
-fn summary_body(marker: &str, details: &str, items: &[(&str, &Value)]) -> String {
+fn summary_body(
+    marker: &str,
+    details: &str,
+    items: &[(&str, &Value)],
+    manual: &[u64],
+    pull_url: &str,
+) -> String {
     let mut parts = vec![
         marker.to_owned(),
         SUMMARY_MARKER.to_owned(),
@@ -884,6 +1006,17 @@ fn summary_body(marker: &str, details: &str, items: &[(&str, &Value)]) -> String
         ));
     } else if items.is_empty() {
         parts.push("No reported warnings or unanchored blocking findings remain.".to_owned());
+    }
+    if !manual.is_empty() {
+        parts.push(format!("### {} obsolete review thread(s) need manual resolution\n\nA reviewer should resolve these threads, then rerun the publisher:", manual.len()));
+        for id in manual.iter().take(MAX_SUMMARY) {
+            parts.push(format!(
+                "- [Review comment {id}]({pull_url}#discussion_r{id})"
+            ));
+        }
+        if manual.len() > MAX_SUMMARY {
+            parts.push(format!("Showing {MAX_SUMMARY} of {} threads; find the remaining unresolved Lint Gate threads in this pull request.", manual.len()));
+        }
     }
     parts.join("\n\n")
 }
