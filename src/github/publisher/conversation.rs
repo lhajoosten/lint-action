@@ -559,7 +559,7 @@ impl Publication<'_> {
         let result = match graphql(self.writes, &query, json!({"id": id})) {
             Err(Error::Status { status: 403, .. }) if resolved => {
                 println!(
-                    "Review-thread resolve mutation denied for thread {id} (HTTP 403); manual resolution is required."
+                    "GitHub denied the resolve mutation for thread {id}. Manual resolution is required."
                 );
                 return Ok(false);
             }
