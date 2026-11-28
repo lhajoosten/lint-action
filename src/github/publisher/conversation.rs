@@ -331,6 +331,10 @@ fn identity(finding: &Value) -> String {
             .collect();
         locations.sort_by_key(|item| identity_json(item, true));
         json!({"rule": finding["rule"], "occurrences": locations})
+    } else if finding["rule"] == "finally-exit" {
+        json!({"rule": finding["rule"], "path": finding["path"], "language": finding["language"],
+            "scope": finding["scope"], "name": finding["name"], "range": finding["range"],
+            "transfer": finding["transfer"]})
     } else {
         json!({"rule": finding["rule"], "path": finding["path"], "language": finding["language"],
             "scope": finding["scope"], "name": finding["name"]})
@@ -817,15 +821,26 @@ fn thread_body(
     let line = anchor
         .line
         .map_or_else(String::new, |line| format!(":{line}"));
+    let detail = finding_detail(finding);
     format!(
-        "{marker}\n<!-- lint-gate-finding:{identity} -->\n**Lint Gate blocking finding**\n\nRule {} {} ({}) at {}{line}; score {}, limit {}.\n\n[Open the verified scan]({details})",
+        "{marker}\n<!-- lint-gate-finding:{identity} -->\n**Lint Gate blocking finding**\n\nRule {} {} ({}) at {}{line}{detail}.\n\n[Open the verified scan]({details})",
         code(&finding["rule"]),
         code(&json!(finding["name"].as_str().unwrap_or_default())),
         code(&json!(finding["severity"].as_str().unwrap_or("error"))),
-        code(&json!(anchor.path)),
-        code(&finding["score"]),
-        code(&finding["limit"])
+        code(&json!(anchor.path))
     )
+}
+
+fn finding_detail(finding: &Value) -> String {
+    if finding["rule"] == "finally-exit" {
+        format!("; {}", code(&finding["message"]))
+    } else {
+        format!(
+            "; score {}, limit {}",
+            code(&finding["score"]),
+            code(&finding["limit"])
+        )
+    }
 }
 
 fn summary_body(marker: &str, details: &str, items: &[(&str, &Value)]) -> String {
@@ -854,13 +869,12 @@ fn summary_body(marker: &str, details: &str, items: &[(&str, &Value)]) -> String
                 "warn"
             });
         parts.push(format!(
-            "- **{heading}** · {} · {} · {} · {} · score {}, limit {}",
+            "- **{heading}** · {} · {} · {} · {}{}",
             code(&finding["rule"]),
             code(&json!(severity)),
             code(&json!(finding["name"].as_str().unwrap_or_default())),
             code(&json!(location)),
-            code(&finding["score"]),
-            code(&finding["limit"])
+            finding_detail(finding).replacen("; ", " · ", 1)
         ));
     }
     if items.len() > MAX_SUMMARY {

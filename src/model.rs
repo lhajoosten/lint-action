@@ -10,12 +10,17 @@ pub enum Rule {
     CyclomaticComplexity,
     CognitiveComplexity,
     SourceDuplication,
+    FinallyExit,
 }
 
 impl Rule {
     pub fn supports(self, language: Language) -> bool {
         match self {
             Self::CyclomaticComplexity => true,
+            Self::FinallyExit => matches!(
+                language,
+                Language::Typescript | Language::Tsx | Language::Python
+            ),
             Self::CognitiveComplexity | Self::SourceDuplication => {
                 matches!(language, Language::Typescript | Language::Tsx)
             }
@@ -109,4 +114,15 @@ impl Diagnostic {
             message: message.into(),
         }
     }
+}
+
+#[derive(Serialize)]
+pub struct FinallyExit {
+    pub rule: Rule,
+    #[serde(flatten)]
+    pub identity: Identity,
+    pub name: String,
+    pub range: Range,
+    pub transfer: String,
+    pub message: &'static str,
 }

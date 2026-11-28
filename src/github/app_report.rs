@@ -1,6 +1,7 @@
 use super::{Result, env_path, render::truncate};
 use crate::model::Range;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{env, fs};
 
 pub const REPORT_NAME: &str = "report.json";
@@ -39,8 +40,10 @@ enum Locations {
 struct Finding {
     rule: String,
     status: String,
-    score: u64,
-    limit: u64,
+    score: Option<u64>,
+    limit: Option<u64>,
+    message: Option<String>,
+    transfer: Option<String>,
     #[serde(flatten)]
     locations: Locations,
 }
@@ -119,7 +122,37 @@ impl AppReport {
 }
 
 pub fn normalize_action() -> Result<()> {
-    let report: ScanReport = serde_json::from_slice(&fs::read(env_path("SCAN_REPORT")?)?)?;
+    let report = read_scan_report()?;
+    let (samples, counts) = samples_and_counts(&report);
+    let normalized = AppReport {
+        version: 1,
+        run_id: env::var("GITHUB_RUN_ID")?.parse()?,
+        attempt: env::var("GITHUB_RUN_ATTEMPT")?.parse()?,
+        revision: env::var("GITHUB_SHA")?,
+        files: report.files_scanned,
+        errors: report.diagnostics.len() as u64,
+        counts,
+        samples,
+    };
+    write_app_report(&normalized)
+}
+
+fn read_scan_report() -> Result<ScanReport> {
+    let raw: Value = serde_json::from_slice(&fs::read(env_path("SCAN_REPORT")?)?)?;
+    let version = raw["format_version"]
+        .as_u64()
+        .ok_or("Missing report version")?;
+    if !matches!(version, 1..=3)
+        || !raw["findings"]
+            .as_array()
+            .is_some_and(|items| items.iter().all(|item| valid_metrics(item, version)))
+    {
+        return Err("Invalid finding metrics or report version".into());
+    }
+    Ok(serde_json::from_value(raw)?)
+}
+
+fn samples_and_counts(report: &ScanReport) -> (Vec<String>, Counts) {
     let mut samples: Vec<_> = report
         .diagnostics
         .iter()
@@ -135,30 +168,43 @@ pub fn normalize_action() -> Result<()> {
                     Locations::Duplication { occurrences } => &occurrences[0],
                     Locations::Single(location) => location,
                 };
+                let metrics = match (item.score, item.limit) {
+                    (Some(score), Some(limit)) => format!(", score {score}, limit {limit}"),
+                    _ => format!(
+                        ", {}: {}",
+                        item.transfer.as_deref().unwrap(),
+                        item.message.as_deref().unwrap()
+                    ),
+                };
                 let sample = format!(
-                    "{}:{} ({}, {status}, score {}, limit {})",
-                    location.path, location.range.start.line, item.rule, item.score, item.limit
+                    "{}:{} ({}, {status}{metrics})",
+                    location.path, location.range.start.line, item.rule
                 );
                 samples.push(truncate(&sample, SAMPLE_LENGTH));
             }
         }
         count
     });
-    let normalized = AppReport {
-        version: 1,
-        run_id: env::var("GITHUB_RUN_ID")?.parse()?,
-        attempt: env::var("GITHUB_RUN_ATTEMPT")?.parse()?,
-        revision: env::var("GITHUB_SHA")?,
-        files: report.files_scanned,
-        errors: report.diagnostics.len() as u64,
-        counts: Counts {
+    (
+        samples,
+        Counts {
             blocking,
             reported,
             baselined,
         },
-        samples,
-    };
-    write_app_report(&normalized)
+    )
+}
+
+fn valid_metrics(item: &Value, version: u64) -> bool {
+    if item["rule"] == "finally-exit" {
+        return version == 3
+            && item.get("score").is_none()
+            && item.get("limit").is_none()
+            && ["message", "transfer"]
+                .iter()
+                .all(|key| item[*key].as_str().is_some_and(|value| !value.is_empty()));
+    }
+    item["score"].as_u64().is_some() && item["limit"].as_u64().is_some()
 }
 
 fn write_app_report(normalized: &AppReport) -> Result<()> {

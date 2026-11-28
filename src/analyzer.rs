@@ -1,5 +1,5 @@
 use crate::grammar::{Decision, Language, Scope};
-use crate::model::{Callable, Diagnostic, ErrorKind, Identity, Rule};
+use crate::model::{Callable, Diagnostic, ErrorKind, FinallyExit, Identity, Rule};
 use crate::{cognitive, duplication};
 use std::collections::BTreeMap;
 use tree_sitter::{Node, Parser};
@@ -7,6 +7,7 @@ use tree_sitter::{Node, Parser};
 #[derive(Default)]
 pub struct Analysis {
     pub callables: Vec<Callable>,
+    pub finally_exits: Vec<FinallyExit>,
     pub diagnostics: Vec<Diagnostic>,
     pub scope_counts: BTreeMap<Identity, usize>,
     pub duplication: Vec<duplication::Source>,
@@ -25,6 +26,7 @@ pub fn analyze(
     duplication_budget: Option<(usize, usize)>,
     cyclomatic_enabled: bool,
     cognitive_enabled: bool,
+    finally_enabled: bool,
 ) -> Result<Analysis, Diagnostic> {
     let parser_error =
         |message: &str| Diagnostic::new(ErrorKind::ParseError, Some(path.to_owned()), message);
@@ -42,6 +44,7 @@ pub fn analyze(
     let cognitive = cognitive_enabled && Rule::CognitiveComplexity.supports(language);
     let mut active = Vec::<Frame>::new();
     let mut entries = Vec::new();
+    let mut ancestors = Vec::new();
     let mut cursor = tree.walk();
     loop {
         let node = cursor.node();
@@ -70,31 +73,26 @@ pub fn analyze(
             };
             *result.scope_counts.entry(identity.clone()).or_default() += 1;
             if is_callable {
-                let base = result.callables.len();
-                let rules = [Rule::CyclomaticComplexity, Rule::CognitiveComplexity];
-                for rule in rules.into_iter().filter(|rule| {
-                    rule.supports(language)
-                        && match rule {
-                            Rule::CyclomaticComplexity => cyclomatic_enabled,
-                            Rule::CognitiveComplexity => cognitive,
-                            Rule::SourceDuplication => false,
-                        }
-                }) {
-                    result.callables.push(Callable {
-                        rule,
-                        identity: identity.clone(),
-                        name: name.clone(),
-                        range: node.range().into(),
-                        score: u64::from(rule == Rule::CyclomaticComplexity),
-                        contributions: Vec::new(),
-                    });
-                }
-                active.push(Frame {
-                    cyclomatic_index: base + usize::from(!cyclomatic_enabled),
-                    cognitive_index: cognitive.then_some(base + usize::from(cyclomatic_enabled)),
-                    depth: 0,
-                });
+                active.push(register_callable(
+                    &mut result.callables,
+                    &identity,
+                    &name,
+                    node,
+                    cyclomatic_enabled,
+                    cognitive,
+                ));
             }
+        }
+        if finally_enabled {
+            collect_finally(
+                &mut result.finally_exits,
+                path,
+                language,
+                node,
+                source,
+                &scope,
+                &ancestors,
+            );
         }
         let mut nested = false;
         if let Some(frame) = active.last_mut() {
@@ -123,6 +121,7 @@ pub fn analyze(
             }
         }
         entries.push((entered_scope, is_callable, nested));
+        ancestors.push(node);
         if cursor.goto_first_child() {
             continue;
         }
@@ -131,6 +130,7 @@ pub fn analyze(
                 collector.exit(cursor.node());
             }
             let (entered_scope, is_callable, nested) = entries.pop().expect("cursor has an entry");
+            ancestors.pop();
             if entered_scope {
                 scope.pop();
             }
@@ -153,6 +153,7 @@ pub fn analyze(
                     .any(|error| error.kind == ErrorKind::ParseError)
                 {
                     result.callables.clear();
+                    result.finally_exits.clear();
                     result.scope_counts.clear();
                 } else {
                     result.duplication.extend(duplicate_source);
@@ -175,5 +176,59 @@ fn decision_points(language: Language, node: Node<'_>) -> u32 {
             | Decision::DefaultValue,
         ) => 1,
         None => 0,
+    }
+}
+
+fn register_callable(
+    callables: &mut Vec<Callable>,
+    identity: &Identity,
+    name: &str,
+    node: Node<'_>,
+    cyclomatic: bool,
+    cognitive: bool,
+) -> Frame {
+    let base = callables.len();
+    for rule in [Rule::CyclomaticComplexity, Rule::CognitiveComplexity]
+        .into_iter()
+        .filter(|rule| match rule {
+            Rule::CyclomaticComplexity => cyclomatic,
+            Rule::CognitiveComplexity => cognitive,
+            Rule::SourceDuplication | Rule::FinallyExit => false,
+        })
+    {
+        callables.push(Callable {
+            rule,
+            identity: identity.clone(),
+            name: name.to_owned(),
+            range: node.range().into(),
+            score: u64::from(rule == Rule::CyclomaticComplexity),
+            contributions: Vec::new(),
+        });
+    }
+    Frame {
+        cyclomatic_index: base + usize::from(!cyclomatic),
+        cognitive_index: cognitive.then_some(base + usize::from(cyclomatic)),
+        depth: 0,
+    }
+}
+
+fn collect_finally(
+    exits: &mut Vec<FinallyExit>,
+    path: &str,
+    language: Language,
+    node: Node<'_>,
+    source: &str,
+    scope: &[Scope],
+    ancestors: &[Node<'_>],
+) {
+    if crate::finally::leaves_finally(language, node, source, ancestors) {
+        exits.push(FinallyExit {
+            rule: Rule::FinallyExit,
+            identity: Identity { path: path.to_owned(), language, scope: scope.to_vec() },
+            name: scope.last().map_or_else(|| "<module>".to_owned(), |part| part.name.clone()),
+            range: crate::finally::transfer_range(language, node, source),
+            transfer: node.kind().trim_end_matches("_statement").to_owned(),
+            message: "Control flow leaving finally can suppress an exception or override an earlier return.",
+        });
     }
 }

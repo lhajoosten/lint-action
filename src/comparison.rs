@@ -1,7 +1,9 @@
 use crate::duplication::{Match, Occurrence, Pair};
-use crate::model::{Callable, Diagnostic, Identity, Range, Rule};
+use crate::model::{Callable, Diagnostic, FinallyExit, Identity, Range, Rule};
 use crate::policy::{BaselineScores, Policy, Severity};
-use crate::{ScoredTree, Status, complexity_status, duplication_status, unique};
+use crate::{
+    ScoredTree, Status, complexity_status, duplication_status, finally_exit_status, unique,
+};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -42,14 +44,16 @@ pub(crate) struct Change {
     pub(crate) category: Category,
     pub(crate) match_status: MatchStatus,
     pub(crate) rule: Rule,
-    pub(crate) limit: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) limit: Option<u32>,
     pub(crate) previous: Option<Observation>,
     pub(crate) current: Option<Observation>,
 }
 
 #[derive(Serialize)]
 pub(crate) struct Observation {
-    pub(crate) score: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) score: Option<u64>,
     pub(crate) status: Option<Status>,
     #[serde(flatten)]
     pub(crate) location: Location,
@@ -64,6 +68,14 @@ pub(crate) enum Location {
         name: String,
         range: Range,
     },
+    FinallyExit {
+        #[serde(flatten)]
+        identity: Identity,
+        name: String,
+        range: Range,
+        transfer: String,
+        message: String,
+    },
     Duplication {
         occurrences: [Occurrence; 2],
     },
@@ -73,6 +85,9 @@ impl Observation {
     fn position(&self) -> (&str, usize, usize) {
         let (path, range) = match &self.location {
             Location::Callable {
+                identity, range, ..
+            }
+            | Location::FinallyExit {
                 identity, range, ..
             } => (&identity.path, range),
             Location::Duplication { occurrences } => (&occurrences[0].path, &occurrences[0].range),
@@ -107,6 +122,12 @@ impl Comparison {
         }
     }
 
+    pub fn set_policy(&mut self, policy: &Policy) {
+        if policy.finally_exit {
+            self.format_version = 2;
+        }
+    }
+
     pub fn unavailable(&mut self, reason: &'static str) {
         self.reason = Some(reason);
     }
@@ -135,7 +156,7 @@ impl Comparison {
                 continue;
             }
             let observe = |item: &Callable, side: usize| Observation {
-                score: item.score,
+                score: Some(item.score),
                 status: (item.score > u64::from(limit))
                     .then(|| complexity_status(item, sides[side].scope_counts, policy, baseline)),
                 location: Location::Callable {
@@ -171,7 +192,7 @@ impl Comparison {
                     category,
                     match_status: MatchStatus::Matched,
                     rule,
-                    limit,
+                    limit: Some(limit),
                     previous: Some(observe(before, 0)),
                     current: Some(observe(after, 1)),
                 });
@@ -186,7 +207,7 @@ impl Comparison {
                         category: Category::Removed,
                         match_status,
                         rule,
-                        limit,
+                        limit: Some(limit),
                         previous: Some(observe(item, 0)),
                         current: None,
                     });
@@ -196,7 +217,7 @@ impl Comparison {
                         category: Category::New,
                         match_status,
                         rule,
-                        limit,
+                        limit: Some(limit),
                         previous: None,
                         current: Some(observe(item, 1)),
                     });
@@ -207,9 +228,59 @@ impl Comparison {
         if let Some(limit) = policy.duplication_minimum {
             unchanged += self.compare_duplicates(sides, limit, policy, baseline);
         }
+        unchanged += self.compare_finally_exits(sides, policy);
         self.unchanged = Some(unchanged);
         self.changes
             .sort_by(|left, right| left.order().cmp(&right.order()));
+    }
+
+    fn compare_finally_exits(&mut self, sides: [&ScoredTree<'_>; 2], policy: &Policy) -> usize {
+        let mut exits = BTreeMap::new();
+        for (side, tree) in sides.into_iter().enumerate() {
+            for exit in &tree.finally_exits {
+                let range = exit.range;
+                let key = (
+                    &exit.identity,
+                    &exit.transfer,
+                    range.start.line,
+                    range.start.column,
+                    range.end.line,
+                    range.end.column,
+                );
+                exits.entry(key).or_insert([None; 2])[side] = Some(exit);
+            }
+        }
+        let mut unchanged = 0;
+        for [previous, current] in exits.into_values() {
+            if previous.is_some() && current.is_some() {
+                unchanged += 1;
+                continue;
+            }
+            let observe = |exit: &FinallyExit| Observation {
+                score: None,
+                status: Some(finally_exit_status(policy)),
+                location: Location::FinallyExit {
+                    identity: exit.identity.clone(),
+                    name: exit.name.clone(),
+                    range: exit.range,
+                    transfer: exit.transfer.clone(),
+                    message: exit.message.to_owned(),
+                },
+            };
+            self.changes.push(Change {
+                category: if current.is_some() {
+                    Category::New
+                } else {
+                    Category::Removed
+                },
+                match_status: MatchStatus::Unmatched,
+                rule: Rule::FinallyExit,
+                limit: None,
+                previous: previous.map(observe),
+                current: current.map(observe),
+            });
+        }
+        unchanged
     }
 
     fn compare_duplicates(
@@ -223,7 +294,7 @@ impl Comparison {
         let observe = |found: &Match<'_>, pair: Option<&Pair>| {
             let detail = found.report();
             Observation {
-                score: detail.score as u64,
+                score: Some(detail.score as u64),
                 status: Some(duplication_status(found, pair, policy, baseline)),
                 location: Location::Duplication {
                     occurrences: detail.occurrences,
@@ -246,7 +317,7 @@ impl Comparison {
                         category,
                         match_status: MatchStatus::Ambiguous,
                         rule,
-                        limit,
+                        limit: Some(limit),
                         previous,
                         current,
                     });
@@ -277,7 +348,7 @@ impl Comparison {
                         category,
                         match_status: MatchStatus::Matched,
                         rule,
-                        limit,
+                        limit: Some(limit),
                         previous: Some(observe(before, Some(pair))),
                         current: Some(observe(after, Some(pair))),
                     });
@@ -294,7 +365,7 @@ impl Comparison {
                     category: Category::Removed,
                     match_status,
                     rule,
-                    limit,
+                    limit: Some(limit),
                     previous: Some(observe(found, Some(pair))),
                     current: None,
                 });
@@ -304,7 +375,7 @@ impl Comparison {
                     category: Category::New,
                     match_status,
                     rule,
-                    limit,
+                    limit: Some(limit),
                     previous: None,
                     current: Some(observe(found, Some(pair))),
                 });
