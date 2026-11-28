@@ -405,7 +405,7 @@ fn graphql(api: &GitHub, query: &str, variables: Value) -> Result<Value> {
     {
         if errors
             .iter()
-            .all(|error| error["extensions"]["type"] == "FORBIDDEN")
+            .all(|error| error["type"] == "FORBIDDEN" || error["extensions"]["type"] == "FORBIDDEN")
         {
             return Err(Error::Status {
                 operation: "review-thread operation".to_owned(),

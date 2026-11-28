@@ -172,11 +172,13 @@ jobs:
           "$RUNNER_TEMP/lint-gate-publisher-build/release/lint-gate" github-rescan "$RUNNER_TEMP/lint-gate-build/release/lint-gate"
       - name: Mark the independent scan complete
         id: ready
-        if: steps.rescan.outputs.outcome == '0' || steps.rescan.outputs.outcome == '1'
+        if: >-
+          steps.rescan.outcome != 'skipped' && steps.rescan.outputs.report &&
+          (steps.rescan.outputs.outcome == '0' || steps.rescan.outputs.outcome == '1')
         run: echo 'complete=true' >> "$GITHUB_OUTPUT"
       - name: Stage trusted scan evidence
         id: stage
-        if: steps.rescan.outputs.outcome == '0' || steps.rescan.outputs.outcome == '1'
+        if: steps.ready.outputs.complete == 'true'
         env:
           VERIFIED_REVISION: ${{ steps.verify.outputs.revision }}
           VERIFIED_BASE: ${{ steps.verify.outputs.base }}
@@ -187,8 +189,7 @@ jobs:
           SCAN_REPORT: ${{ steps.rescan.outputs.report }}
         run: '"$RUNNER_TEMP/lint-gate-publisher-build/release/lint-gate" github-stage-evidence'
       - name: Upload trusted scan evidence
-        if: >-
-          steps.rescan.outputs.outcome == '0' || steps.rescan.outputs.outcome == '1'
+        if: steps.stage.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.stage.outputs.artifact_name }}

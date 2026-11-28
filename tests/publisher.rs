@@ -35,6 +35,7 @@ struct State {
     stop_after_reservation: bool,
     forbid_threads: bool,
     forbid_mutation: bool,
+    mutation_errors: Option<Value>,
     can_resolve: bool,
     can_reopen: bool,
     reject_review: bool,
@@ -69,6 +70,7 @@ impl State {
             stop_after_reservation: false,
             forbid_threads: false,
             forbid_mutation: false,
+            mutation_errors: None,
             can_resolve: true,
             can_reopen: true,
             reject_review: false,
@@ -101,6 +103,13 @@ impl State {
             }
             let query = payload["query"].as_str().unwrap();
             let data = if query.contains("mutation") {
+                if let Some(errors) = &self.mutation_errors {
+                    return (
+                        200,
+                        json!({"data": {"resolveReviewThread": null}, "errors": errors}),
+                        None,
+                    );
+                }
                 if self.forbid_mutation {
                     return (
                         200,
@@ -860,6 +869,30 @@ fn all_denied_obsolete_threads_are_reported_and_other_findings_continue() {
     let state = fixture.mock.state.lock().unwrap();
     assert_eq!(state.issue["body"], prior);
     assert_eq!(state.reviews.len(), 20);
+}
+
+#[test]
+fn hosted_graphql_forbidden_shape_is_recoverable_but_mixed_errors_are_fatal() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    fixture.deliver(&[finding("flow", 2, "blocking")], &["flow.ts"]);
+    fixture.blocking(false);
+    let forbidden = json!({"type":"FORBIDDEN", "path":["resolveReviewThread"],
+        "locations":[{"line":1,"column":21}], "message":"Resource not accessible by integration"});
+    fixture.mock.state.lock().unwrap().mutation_errors = Some(json!([forbidden.clone()]));
+    fixture.deliver(&[], &["flow.ts"]);
+    assert!(
+        fixture.mock.state.lock().unwrap().issue["body"]
+            .as_str()
+            .unwrap()
+            .contains("#discussion_r1000")
+    );
+    fixture.mock.state.lock().unwrap().mutation_errors =
+        Some(json!([forbidden, {"type":"INTERNAL", "message":"Unexpected error"}]));
+    let result = fixture.publish(2, &[], true, &["flow.ts"], |_| {});
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("resolve mutation for thread"));
+    assert_eq!(fixture.mock.state.lock().unwrap().thread_updates, 0);
 }
 
 #[test]
