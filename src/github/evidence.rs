@@ -48,19 +48,23 @@ pub fn rescan(analyzer: &Path) -> Result<u8> {
     if !head.status.success() || str::from_utf8(&head.stdout)?.trim() != merge {
         return Err("the checked-out candidate is not the verified synthetic merge".into());
     }
+    run_verified_scan(analyzer, &candidate)
+}
+
+fn run_verified_scan(analyzer: &Path, candidate: &Path) -> Result<u8> {
     let runner = env_path("RUNNER_TEMP")?;
     let policy = tempfile::tempdir_in(&runner)?;
-    repository::copy_policy(&candidate, &revision("VERIFIED_BASE")?, policy.path())?;
+    repository::copy_policy(candidate, &revision("VERIFIED_BASE")?, policy.path())?;
     // This is the CLI built from the verified scanner revision. Its stable scan command
     // also works with provider releases that predate the Rust GitHub integration.
-    let mut report = tempfile::Builder::new()
+    let report = tempfile::Builder::new()
         .prefix("lint-gate-report-")
         .suffix(".json")
         .tempfile_in(&runner)?;
     let status = Command::new(analyzer)
         .arg("scan")
         .arg("--root")
-        .arg(&candidate)
+        .arg(candidate)
         .arg("--config")
         .arg(policy.path().join(crate::policy::CONFIG_FILE))
         .stdout(report.reopen()?)
@@ -69,6 +73,10 @@ pub fn rescan(analyzer: &Path) -> Result<u8> {
         Some(code @ (0..=2)) => code,
         _ => return Err("verified scanner exited unexpectedly".into()),
     };
+    save_scan_report(report, status)
+}
+
+fn save_scan_report(mut report: tempfile::NamedTempFile, status: i32) -> Result<u8> {
     report.flush()?;
     let (_, path) = report.keep()?;
     append(
@@ -101,35 +109,43 @@ pub fn findings(report: &Value) -> Option<&[Value]> {
         return None;
     }
     let findings = report["findings"].as_array()?;
-    for finding in findings {
-        let status = finding["status"].as_str()?;
-        let severity = finding["severity"].as_str();
-        if !matches!(status, "reported" | "baselined" | "blocking")
-            || (version == 2 || !finding["severity"].is_null())
-                && !matches!(severity, Some("error" | "warn" | "pass"))
-            || matches!(status, "blocking" | "baselined")
-                && !matches!(severity, None | Some("error"))
-            || status == "reported" && severity == Some("pass")
-            || finding["score"].as_i64().is_none()
-            || finding["limit"].as_i64().is_none()
-        {
-            return None;
-        }
-        if finding["rule"].as_str()? == "source-duplication" {
-            if finding["occurrences"]
-                .as_array()
-                .is_none_or(|items| items.len() != 2)
-            {
-                return None;
-            }
-        } else if !["path", "range", "name", "scope", "language"]
-            .iter()
-            .all(|key| finding.get(key).is_some())
-        {
-            return None;
-        }
+    if !findings
+        .iter()
+        .all(|finding| valid_finding(finding, version))
+    {
+        return None;
     }
     Some(findings)
+}
+
+fn valid_finding(finding: &Value, version: u64) -> bool {
+    let Some(status) = finding["status"].as_str() else {
+        return false;
+    };
+    let severity = finding["severity"].as_str();
+    if !valid_severity(finding, version, status, severity)
+        || finding["score"].as_i64().is_none()
+        || finding["limit"].as_i64().is_none()
+    {
+        return false;
+    }
+    match finding["rule"].as_str() {
+        Some("source-duplication") => finding["occurrences"]
+            .as_array()
+            .is_some_and(|items| items.len() == 2),
+        Some(_) => ["path", "range", "name", "scope", "language"]
+            .iter()
+            .all(|key| finding.get(key).is_some()),
+        None => false,
+    }
+}
+
+fn valid_severity(finding: &Value, version: u64, status: &str, severity: Option<&str>) -> bool {
+    !(!matches!(status, "reported" | "baselined" | "blocking")
+        || (version == 2 || !finding["severity"].is_null())
+            && !matches!(severity, Some("error" | "warn" | "pass"))
+        || matches!(status, "blocking" | "baselined") && !matches!(severity, None | Some("error"))
+        || status == "reported" && severity == Some("pass"))
 }
 
 pub fn locations(finding: &Value) -> &[Value] {
@@ -156,6 +172,16 @@ pub fn stage() -> Result<u8> {
     let revision = revision("VERIFIED_REVISION")?;
     let head = self::revision("VERIFIED_HEAD")?;
     let base = self::revision("VERIFIED_BASE")?;
+    let compatible_paths = compatible_paths(findings, &candidate, &revision, &head)?;
+    write_stage(bytes, revision, head, base, compatible_paths)
+}
+
+fn compatible_paths(
+    findings: &[Value],
+    candidate: &Path,
+    revision: &str,
+    head: &str,
+) -> Result<BTreeSet<String>> {
     let paths: BTreeSet<_> = findings
         .iter()
         .flat_map(locations)
@@ -163,12 +189,22 @@ pub fn stage() -> Result<u8> {
         .collect();
     let mut compatible_paths = BTreeSet::new();
     for path in paths {
-        if let Some(merge) = blob(&candidate, &revision, path)?
-            && blob(&candidate, &head, path)?.as_ref() == Some(&merge)
+        if let Some(merge) = blob(candidate, revision, path)?
+            && blob(candidate, head, path)?.as_ref() == Some(&merge)
         {
             compatible_paths.insert(path.to_owned());
         }
     }
+    Ok(compatible_paths)
+}
+
+fn write_stage(
+    bytes: Vec<u8>,
+    revision: String,
+    head: String,
+    base: String,
+    compatible_paths: BTreeSet<String>,
+) -> Result<u8> {
     let run: u64 = env::var("GITHUB_RUN_ID")?.parse()?;
     let attempt: u64 = env::var("GITHUB_RUN_ATTEMPT")?.parse()?;
     let manifest = Manifest {
@@ -181,6 +217,10 @@ pub fn stage() -> Result<u8> {
         artifact_name: format!("lint-gate-verified-findings-{run}-{attempt}"),
         compatible_paths,
     };
+    write_manifest(bytes, manifest)
+}
+
+fn write_manifest(bytes: Vec<u8>, manifest: Manifest) -> Result<u8> {
     let output = env_path("RUNNER_TEMP")?.join("lint-gate-findings");
     fs::create_dir_all(&output)?;
     fs::write(output.join("report.json"), bytes)?;

@@ -279,23 +279,7 @@ fn comparison_summary(
         }
     }
     let Some(unchanged) = comparison.unchanged else {
-        let reason = match comparison.reason {
-            Some("candidate_analysis_failed") => "Candidate analysis failed.",
-            Some("base_analysis_failed") => "Base analysis failed.",
-            _ => "The exact base source tree is unavailable.",
-        };
-        writeln!(summary, "**Comparison unavailable.** {reason}").unwrap();
-        if let Some(error) = base_error {
-            writeln!(summary, "- {}", summary_text(&truncate(error, 500))).unwrap();
-        }
-        for item in comparison.base_diagnostics.iter().take(LIMIT) {
-            let text = format!("{}: {}", label(item.kind), item.message);
-            let text = item
-                .path
-                .as_ref()
-                .map_or(text.clone(), |path| format!("{path} — {text}"));
-            writeln!(summary, "- {}", summary_text(&truncate(&text, 500))).unwrap();
-        }
+        describe_unavailable(&mut summary, comparison, base_error);
         return summary;
     };
 
@@ -343,6 +327,26 @@ fn comparison_summary(
         }
     }
     summary
+}
+
+fn describe_unavailable(summary: &mut String, comparison: &Comparison, base_error: Option<&str>) {
+    let reason = match comparison.reason {
+        Some("candidate_analysis_failed") => "Candidate analysis failed.",
+        Some("base_analysis_failed") => "Base analysis failed.",
+        _ => "The exact base source tree is unavailable.",
+    };
+    writeln!(summary, "**Comparison unavailable.** {reason}").unwrap();
+    if let Some(error) = base_error {
+        writeln!(summary, "- {}", summary_text(&truncate(error, 500))).unwrap();
+    }
+    for item in comparison.base_diagnostics.iter().take(LIMIT) {
+        let text = format!("{}: {}", label(item.kind), item.message);
+        let text = item
+            .path
+            .as_ref()
+            .map_or(text.clone(), |path| format!("{path} — {text}"));
+        writeln!(summary, "- {}", summary_text(&truncate(&text, 500))).unwrap();
+    }
 }
 
 pub fn report(report: &Report, code: u8, relative: &Path, base_error: Option<&str>) -> Result<()> {

@@ -158,11 +158,12 @@ pub fn normalize_action() -> Result<()> {
         },
         samples,
     };
+    write_app_report(&normalized)
+}
+
+fn write_app_report(normalized: &AppReport) -> Result<()> {
     let directory = env_path("RUNNER_TEMP")?.join("lint-gate-app");
     fs::create_dir(&directory)?;
-    fs::write(
-        directory.join(REPORT_NAME),
-        serde_json::to_vec(&normalized)?,
-    )?;
+    fs::write(directory.join(REPORT_NAME), serde_json::to_vec(normalized)?)?;
     Ok(())
 }

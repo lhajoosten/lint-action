@@ -11,7 +11,7 @@ use std::env;
 use std::error::Error;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const CHECK: &str = "lint-gate quality gate";
@@ -91,16 +91,38 @@ fn run_scan(event: &str, base: Option<&str>, pr: bool, comparing: bool) -> Resul
         },
         baseline: None,
     };
+    let (report, base_error) =
+        scan_candidate(settings, &repository, temporary.path(), base, comparing);
+    let status = report.status();
+    let output = persist_report(&runner_temp, &report)?;
+    append("GITHUB_OUTPUT", &format!("report={}\n", output.display()))?;
+    render::report(
+        &report,
+        status,
+        repository.strip_prefix(&workspace)?,
+        base_error.as_deref(),
+    )?;
+    append("GITHUB_OUTPUT", &format!("outcome={status}\n"))?;
+    Ok(status)
+}
+
+fn scan_candidate(
+    settings: Settings,
+    repository: &Path,
+    temporary: &Path,
+    base: Option<&str>,
+    comparing: bool,
+) -> (Report, Option<String>) {
     let mut report = Report::new();
     let mut base_error = None;
     if comparing {
         let mut comparison = Comparison::new(
             base.filter(|sha| repository::is_object_id(sha))
                 .map(str::to_owned),
-            repository::candidate_revision(&repository),
+            repository::candidate_revision(repository),
         );
-        let base_root = temporary.path().join("base");
-        let available = match repository::materialize_base(&repository, base, &base_root) {
+        let base_root = temporary.join("base");
+        let available = match repository::materialize_base(repository, base, &base_root) {
             Ok(()) => Some(base_root.as_path()),
             Err(error) => {
                 base_error = Some(error.to_string());
@@ -115,20 +137,15 @@ fn run_scan(event: &str, base: Option<&str>, pr: bool, comparing: bool) -> Resul
     } else if let Err(diagnostic) = scan(&settings, &[], &mut report, false) {
         report.diagnostics.push(diagnostic);
     }
-    let status = report.status();
+    (report, base_error)
+}
+
+fn persist_report(runner_temp: &Path, report: &Report) -> Result<PathBuf> {
     let mut output = tempfile::Builder::new()
         .prefix("lint-gate-report-")
         .suffix(".json")
-        .tempfile_in(&runner_temp)?;
-    write_json(&mut output, &report)?;
+        .tempfile_in(runner_temp)?;
+    write_json(&mut output, report)?;
     let (_, output) = output.keep()?;
-    append("GITHUB_OUTPUT", &format!("report={}\n", output.display()))?;
-    render::report(
-        &report,
-        status,
-        repository.strip_prefix(&workspace)?,
-        base_error.as_deref(),
-    )?;
-    append("GITHUB_OUTPUT", &format!("outcome={status}\n"))?;
-    Ok(status)
+    Ok(output)
 }

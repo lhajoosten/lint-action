@@ -143,17 +143,7 @@ fn verified_run(api: &GitHub, event: &Event, config: &Config) -> Result<Run> {
             "The source run has advanced to a different attempt.",
         ));
     }
-    if *incoming != run.identity
-        || event.repository.id != config.repository_id
-        || run.repository.id != config.repository_id
-        || run.identity.workflow_id != workflow.id
-        || run.path.split('@').next() != Some(&format!(".github/workflows/{}", config.workflow))
-        || run.identity.event != "pull_request"
-    {
-        return Err(Error::skip(
-            "The completed run is outside the configured PR analysis workflow.",
-        ));
-    }
+    verify_run_metadata(incoming, &run, event, config, &workflow)?;
     let matches = run
         .referenced_workflows
         .iter()
@@ -166,6 +156,27 @@ fn verified_run(api: &GitHub, event: &Event, config: &Config) -> Result<Run> {
         ));
     }
     Ok(run)
+}
+
+fn verify_run_metadata(
+    incoming: &RunIdentity,
+    run: &Run,
+    event: &Event,
+    config: &Config,
+    workflow: &Repository,
+) -> Result<()> {
+    if *incoming != run.identity
+        || event.repository.id != config.repository_id
+        || run.repository.id != config.repository_id
+        || run.identity.workflow_id != workflow.id
+        || run.path.split('@').next() != Some(&format!(".github/workflows/{}", config.workflow))
+        || run.identity.event != "pull_request"
+    {
+        return Err(Error::skip(
+            "The completed run is outside the configured PR analysis workflow.",
+        ));
+    }
+    Ok(())
 }
 
 fn candidate_job(api: &GitHub, run: &RunIdentity, name: &str) -> Result<Candidate> {
@@ -221,22 +232,8 @@ fn target_head(
         ..
     } = candidate;
     let pr: PullRequest = api.json(&format!("/pulls/{number}"))?;
-    let head = pr.head;
-    if pr.number != *number
-        || pr.state != "open"
-        || pr.base.repo.map(|repo| repo.id) != Some(repository_id)
-        || pr.base.sha != *base
-        || pr.merge_commit_sha.as_ref() != Some(revision)
-        || head.repo.is_none()
-        || head.repo.map(|repo| repo.id) != run.head_repository.as_ref().map(|repo| repo.id)
-        || head.branch.as_deref() != Some(run.head_branch.as_str())
-        || !is_sha(&head.sha, 40)
-        || (run.identity.head_sha != head.sha && run.identity.head_sha != *revision)
-    {
-        return Err(Error::skip(
-            "The recorded synthetic merge no longer matches the open PR and source run.",
-        ));
-    }
+    let head = &pr.head;
+    verify_pr_metadata(&pr, head, run, candidate, repository_id)?;
     let commit: Commit = api.json(&format!("/git/commits/{revision}"))?;
     if commit.sha != *revision
         || !commit
@@ -249,7 +246,39 @@ fn target_head(
             "GitHub could not bind the synthetic merge to the PR head and base.",
         ));
     }
-    Ok(head.sha)
+    Ok(head.sha.clone())
+}
+
+fn verify_pr_metadata(
+    pr: &PullRequest,
+    head: &PullRef,
+    run: &Run,
+    candidate: &Candidate,
+    repository_id: u64,
+) -> Result<()> {
+    let Candidate {
+        number,
+        revision,
+        base,
+        ..
+    } = candidate;
+    if pr.number != *number
+        || pr.state != "open"
+        || pr.base.repo.as_ref().map(|repo| repo.id) != Some(repository_id)
+        || pr.base.sha != *base
+        || pr.merge_commit_sha.as_ref() != Some(revision)
+        || head.repo.is_none()
+        || head.repo.as_ref().map(|repo| repo.id)
+            != run.head_repository.as_ref().map(|repo| repo.id)
+        || head.branch.as_deref() != Some(run.head_branch.as_str())
+        || !is_sha(&head.sha, 40)
+        || (run.identity.head_sha != head.sha && run.identity.head_sha != *revision)
+    {
+        return Err(Error::skip(
+            "The recorded synthetic merge no longer matches the open PR and source run.",
+        ));
+    }
+    Ok(())
 }
 
 fn scan_outcome(steps: &BTreeMap<String, Option<String>>) -> Outcome {
@@ -322,22 +351,7 @@ fn load_report(api: &GitHub, run: &Run, revision: &str, outcome: Outcome) -> Rep
     let Some(artifact) = matching.next() else {
         return Err("The analysis report is missing.");
     };
-    let metadata = &artifact["workflow_run"];
-    let id = artifact["id"]
-        .as_u64()
-        .filter(|id| *id > 0)
-        .ok_or(unusable)?;
-    if matching.next().is_some()
-        || artifact["expired"] != false
-        || !artifact["size_in_bytes"]
-            .as_u64()
-            .is_some_and(|size| (1..=REPORT_LIMIT as u64).contains(&size))
-        || metadata["id"] != run.identity.id
-        || metadata["repository_id"] != run.repository.id
-        || metadata["head_sha"] != *head_sha
-    {
-        return Err(unusable);
-    }
+    let id = report_artifact_id(artifact, matching.next().is_some(), run, head_sha, unusable)?;
     let report = unpack_report(api.artifact(id).map_err(|_| unusable)?).map_err(|_| unusable)?;
     let passed = match outcome {
         Outcome::Passed => Some(true),
@@ -348,6 +362,32 @@ fn load_report(api: &GitHub, run: &Run, revision: &str, outcome: Outcome) -> Rep
         .validate(run.identity.id, *run_attempt, revision, passed)
         .map_err(|_| unusable)?;
     Ok(Some(report))
+}
+
+fn report_artifact_id(
+    artifact: &Value,
+    duplicate: bool,
+    run: &Run,
+    head_sha: &str,
+    unusable: &'static str,
+) -> std::result::Result<u64, &'static str> {
+    let metadata = &artifact["workflow_run"];
+    let id = artifact["id"]
+        .as_u64()
+        .filter(|id| *id > 0)
+        .ok_or(unusable)?;
+    if duplicate
+        || artifact["expired"] != false
+        || !artifact["size_in_bytes"]
+            .as_u64()
+            .is_some_and(|size| (1..=REPORT_LIMIT as u64).contains(&size))
+        || metadata["id"] != run.identity.id
+        || metadata["repository_id"] != run.repository.id
+        || metadata["head_sha"] != *head_sha
+    {
+        return Err(unusable);
+    }
+    Ok(id)
 }
 
 fn literal_sample(sample: &str) -> String {
@@ -387,17 +427,31 @@ fn check_output(
                 .to_owned(),
         );
     }
+    add_report_summary(report, outcome, &mut title, &mut conclusion, &mut summary);
+    json!({
+        "name": CHECK, "status": "completed", "conclusion": conclusion, "details_url": details_url,
+        "output": {"title": title, "summary": summary.join("\n\n")},
+    })
+}
+
+fn add_report_summary(
+    report: ReportResult,
+    outcome: Outcome,
+    title: &mut &str,
+    conclusion: &mut &str,
+    summary: &mut Vec<String>,
+) {
     match report {
         Err(error) => {
             summary.push(error.to_owned());
             if outcome == Outcome::Passed {
-                (title, conclusion) = ("Report unavailable", "neutral");
+                (*title, *conclusion) = ("Report unavailable", "neutral");
             }
         }
         Ok(Some(report)) => {
             let counts = report.counts;
             if outcome == Outcome::Passed && (counts.reported != 0 || counts.baselined != 0) {
-                (title, conclusion) = ("Warnings", "neutral");
+                (*title, *conclusion) = ("Warnings", "neutral");
             }
             summary.push(format!(
                 "Files scanned {} · Analysis errors {} · Reported {} · Baselined {} · Blocking {}",
@@ -415,10 +469,6 @@ fn check_output(
         }
         Ok(None) => {}
     }
-    json!({
-        "name": CHECK, "status": "completed", "conclusion": conclusion, "details_url": details_url,
-        "output": {"title": title, "summary": summary.join("\n\n")},
-    })
 }
 
 fn check_matches(check: &Value, app_id: u64, target: &str) -> bool {
@@ -522,12 +572,7 @@ fn context() -> Result<(Config, Event, GitHub, String)> {
     let repository = required("GITHUB_REPOSITORY")?;
     let scanner = required("SCANNER_WORKFLOW")?;
     let workflow = required("SOURCE_WORKFLOW")?;
-    if !Regex::new(r"\A[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+\z").unwrap().is_match(&repository)
-        || !Regex::new(r"\A[a-zA-Z0-9_.-]+\.ya?ml\z").unwrap().is_match(&workflow)
-        || !Regex::new(r"\A[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+/\.github/workflows/source-complexity\.yml@(?:[0-9a-f]{40}|refs/heads/[\w./-]+)\z").unwrap().is_match(&scanner)
-    {
-        return Err(Error::Metadata);
-    }
+    validate_context_names(&repository, &scanner, &workflow)?;
     let config = Config {
         workflow,
         scanner,
@@ -538,12 +583,26 @@ fn context() -> Result<(Config, Event, GitHub, String)> {
         repository_url: format!("{}/{repository}", required("GITHUB_SERVER_URL")?),
         repository: repository.clone(),
     };
-    let event = fs::read(env::var_os("GITHUB_EVENT_PATH").ok_or(Error::Metadata)?)
-        .map_err(|_| Error::Metadata)?;
-    let event = serde_json::from_slice(&event).map_err(|_| Error::Metadata)?;
+    let event = read_event()?;
     let base_url = required("GITHUB_API_URL")?;
     let api = GitHub::new(&base_url, &repository, required("GITHUB_TOKEN")?);
     Ok((config, event, api, base_url))
+}
+
+fn read_event() -> Result<Event> {
+    let event = fs::read(env::var_os("GITHUB_EVENT_PATH").ok_or(Error::Metadata)?)
+        .map_err(|_| Error::Metadata)?;
+    serde_json::from_slice(&event).map_err(|_| Error::Metadata)
+}
+
+fn validate_context_names(repository: &str, scanner: &str, workflow: &str) -> Result<()> {
+    if !Regex::new(r"\A[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+\z").unwrap().is_match(repository)
+        || !Regex::new(r"\A[a-zA-Z0-9_.-]+\.ya?ml\z").unwrap().is_match(workflow)
+        || !Regex::new(r"\A[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+/\.github/workflows/source-complexity\.yml@(?:[0-9a-f]{40}|refs/heads/[\w./-]+)\z").unwrap().is_match(scanner)
+    {
+        return Err(Error::Metadata);
+    }
+    Ok(())
 }
 
 fn app_id() -> Result<u64> {

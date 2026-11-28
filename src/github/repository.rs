@@ -61,25 +61,7 @@ pub fn trusted_policy(
         if revision.is_some() {
             return Err("policy-directory and policy-ref are mutually exclusive".into());
         }
-        let directory = Path::new(&directory);
-        if !directory.is_absolute() || !directory.is_dir() {
-            return Err("policy-directory must be an existing absolute directory".into());
-        }
-        let directory = fs::canonicalize(directory)?;
-        if directory.starts_with(workspace) {
-            return Err(
-                "policy-directory and its policy files must be outside GITHUB_WORKSPACE".into(),
-            );
-        }
-        for name in [CONFIG_FILE, BASELINE_FILE] {
-            let resolved = resolve_policy_path(&directory.join(name), 64)?;
-            if resolved.starts_with(workspace) {
-                return Err(
-                    "policy-directory and its policy files must be outside GITHUB_WORKSPACE".into(),
-                );
-            }
-        }
-        return Ok(directory.join(CONFIG_FILE));
+        return external_policy(Path::new(&directory), workspace);
     }
     match revision.as_deref().or(base) {
         Some(revision) => {
@@ -89,6 +71,27 @@ pub fn trusted_policy(
         None if pr => Err("pull request base SHA is unavailable".into()),
         None => Ok(repository.join(CONFIG_FILE)),
     }
+}
+
+fn external_policy(directory: &Path, workspace: &Path) -> Result<PathBuf> {
+    if !directory.is_absolute() || !directory.is_dir() {
+        return Err("policy-directory must be an existing absolute directory".into());
+    }
+    let directory = fs::canonicalize(directory)?;
+    if directory.starts_with(workspace) {
+        return Err(
+            "policy-directory and its policy files must be outside GITHUB_WORKSPACE".into(),
+        );
+    }
+    for name in [CONFIG_FILE, BASELINE_FILE] {
+        let resolved = resolve_policy_path(&directory.join(name), 64)?;
+        if resolved.starts_with(workspace) {
+            return Err(
+                "policy-directory and its policy files must be outside GITHUB_WORKSPACE".into(),
+            );
+        }
+    }
+    Ok(directory.join(CONFIG_FILE))
 }
 
 // Optional policy files may be absent. Resolve any existing symlink so a
@@ -107,18 +110,22 @@ fn resolve_policy_path(path: &Path, remaining: usize) -> io::Result<PathBuf> {
                 return Ok(parent);
             }
             let candidate = parent.join(component.as_os_str());
-            match fs::read_link(&candidate) {
-                Ok(target) => resolve_policy_path(&parent.join(target), remaining - 1),
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::NotFound | io::ErrorKind::InvalidInput
-                    ) =>
-                {
-                    Ok(candidate)
-                }
-                Err(error) => Err(error),
-            }
+            resolve_link(&candidate, &parent, remaining)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn resolve_link(candidate: &Path, parent: &Path, remaining: usize) -> io::Result<PathBuf> {
+    match fs::read_link(candidate) {
+        Ok(target) => resolve_policy_path(&parent.join(target), remaining - 1),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::InvalidInput
+            ) =>
+        {
+            Ok(candidate.to_owned())
         }
         Err(error) => Err(error),
     }
@@ -138,34 +145,49 @@ pub(super) fn copy_policy(repository: &Path, revision: &str, directory: &Path) -
         (CONFIG_FILE, 4 * 1024 * 1024),
         (BASELINE_FILE, 16 * 1024 * 1024),
     ] {
-        let entry = output(repository, &["ls-tree", revision, "--", name])?;
-        let read_error = || format!("cannot read {name} at trusted revision {revision}");
-        if !entry.status.success() {
-            return Err(read_error().into());
+        if has_policy_file(repository, revision, name)? {
+            copy_policy_blob(repository, revision, directory, name, limit)?;
         }
-        if entry.stdout.is_empty() {
-            if name == BASELINE_FILE {
-                continue;
-            }
-            return Err(format!("{name} is missing from trusted revision {revision}").into());
-        }
-        if !(entry.stdout.starts_with(b"100644 blob ") || entry.stdout.starts_with(b"100755 blob "))
-        {
-            return Err(
-                format!("{name} at trusted revision {revision} must be a regular file").into(),
-            );
-        }
-        let spec = format!("{revision}:{name}");
-        let size = output(repository, &["cat-file", "-s", &spec])?;
-        if !size.status.success() || size_number(&size.stdout).is_none_or(|size| size > limit) {
-            return Err(format!("{} within {limit} bytes", read_error()).into());
-        }
-        let blob = output(repository, &["cat-file", "blob", &spec])?;
-        if !blob.status.success() {
-            return Err(read_error().into());
-        }
-        fs::write(directory.join(name), blob.stdout)?;
     }
+    Ok(())
+}
+
+fn has_policy_file(repository: &Path, revision: &str, name: &str) -> Result<bool> {
+    let entry = output(repository, &["ls-tree", revision, "--", name])?;
+    let read_error = || format!("cannot read {name} at trusted revision {revision}");
+    if !entry.status.success() {
+        return Err(read_error().into());
+    }
+    if entry.stdout.is_empty() {
+        if name == BASELINE_FILE {
+            return Ok(false);
+        }
+        return Err(format!("{name} is missing from trusted revision {revision}").into());
+    }
+    if !(entry.stdout.starts_with(b"100644 blob ") || entry.stdout.starts_with(b"100755 blob ")) {
+        return Err(format!("{name} at trusted revision {revision} must be a regular file").into());
+    }
+    Ok(true)
+}
+
+fn copy_policy_blob(
+    repository: &Path,
+    revision: &str,
+    directory: &Path,
+    name: &str,
+    limit: u64,
+) -> Result<()> {
+    let read_error = || format!("cannot read {name} at trusted revision {revision}");
+    let spec = format!("{revision}:{name}");
+    let size = output(repository, &["cat-file", "-s", &spec])?;
+    if !size.status.success() || size_number(&size.stdout).is_none_or(|size| size > limit) {
+        return Err(format!("{} within {limit} bytes", read_error()).into());
+    }
+    let blob = output(repository, &["cat-file", "blob", &spec])?;
+    if !blob.status.success() {
+        return Err(read_error().into());
+    }
+    fs::write(directory.join(name), blob.stdout)?;
     Ok(())
 }
 
@@ -249,60 +271,81 @@ fn copy_blobs(
         .split(|byte| *byte == 0)
         .filter(|entry| !entry.is_empty())
     {
-        let tab = entry
-            .iter()
-            .position(|byte| *byte == b'\t')
-            .ok_or("invalid Git tree entry")?;
-        let (metadata, name) = (&entry[..tab], &entry[tab + 1..]);
-        let fields: Vec<_> = metadata.split(|byte| *byte == b' ').collect();
-        let [mode, _, object] = fields.as_slice() else {
-            return Err("invalid Git tree metadata".into());
-        };
-        if !matches!(*mode, b"100644" | b"100755") {
-            continue;
+        if let Some((object, relative)) = regular_blob_entry(entry)? {
+            let target = directory.join(relative);
+            fs::create_dir_all(target.parent().unwrap())?;
+            requests.write_all(object)?;
+            requests.write_all(b"\n")?;
+            requests.flush()?;
+            let size = read_blob_size(&mut blobs, &mut header, object, revision)?;
+            write_blob(&mut blobs, &target, size, revision)?;
         }
-        if name
-            .split(|byte| *byte == b'/')
-            .any(|part| matches!(part, b"" | b"." | b".." | b".git"))
-        {
-            return Err("the PR base contains an invalid source path".into());
-        }
-        #[cfg(unix)]
-        let relative = {
-            use std::os::unix::ffi::OsStrExt;
-            Path::new(std::ffi::OsStr::from_bytes(name))
-        };
-        #[cfg(not(unix))]
-        let relative = Path::new(str::from_utf8(name)?);
-        if relative
-            .components()
-            .any(|part| !matches!(part, Component::Normal(_)))
-        {
-            return Err("the PR base contains an invalid source path".into());
-        }
-        let target = directory.join(relative);
-        fs::create_dir_all(target.parent().unwrap())?;
-        requests.write_all(object)?;
-        requests.write_all(b"\n")?;
-        requests.flush()?;
-        header.clear();
-        blobs.read_until(b'\n', &mut header)?;
-        let fields: Vec<_> = header.split(|byte| *byte == b' ').collect();
-        let [id, b"blob", size] = fields.as_slice() else {
-            return Err(format!("cannot read a source blob from PR base {revision}").into());
-        };
-        let size = size_number(size)
-            .filter(|_| id == object)
-            .ok_or_else(|| format!("cannot read a source blob from PR base {revision}"))?;
-        let mut output = File::create(target)?;
-        if io::copy(&mut (&mut blobs).take(size), &mut output)? != size {
-            return Err(format!("incomplete source blob from PR base {revision}").into());
-        }
-        let mut newline = [0];
-        blobs.read_exact(&mut newline)?;
-        if newline != [b'\n'] {
-            return Err(format!("invalid source blob from PR base {revision}").into());
-        }
+    }
+    Ok(())
+}
+
+fn regular_blob_entry(entry: &[u8]) -> Result<Option<(&[u8], &Path)>> {
+    let tab = entry
+        .iter()
+        .position(|byte| *byte == b'\t')
+        .ok_or("invalid Git tree entry")?;
+    let (metadata, name) = (&entry[..tab], &entry[tab + 1..]);
+    let fields: Vec<_> = metadata.split(|byte| *byte == b' ').collect();
+    let [mode, _, object] = fields.as_slice() else {
+        return Err("invalid Git tree metadata".into());
+    };
+    if !matches!(*mode, b"100644" | b"100755") {
+        return Ok(None);
+    }
+    if name
+        .split(|byte| *byte == b'/')
+        .any(|part| matches!(part, b"" | b"." | b".." | b".git"))
+    {
+        return Err("the PR base contains an invalid source path".into());
+    }
+    #[cfg(unix)]
+    let relative = {
+        use std::os::unix::ffi::OsStrExt;
+        Path::new(std::ffi::OsStr::from_bytes(name))
+    };
+    #[cfg(not(unix))]
+    let relative = Path::new(str::from_utf8(name)?);
+    if relative
+        .components()
+        .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return Err("the PR base contains an invalid source path".into());
+    }
+    Ok(Some((object, relative)))
+}
+
+fn read_blob_size(
+    blobs: &mut impl BufRead,
+    header: &mut Vec<u8>,
+    object: &[u8],
+    revision: &str,
+) -> Result<u64> {
+    header.clear();
+    blobs.read_until(b'\n', header)?;
+    let fields: Vec<_> = header.split(|byte| *byte == b' ').collect();
+    let [id, b"blob", size] = fields.as_slice() else {
+        return Err(format!("cannot read a source blob from PR base {revision}").into());
+    };
+    let size = size_number(size)
+        .filter(|_| *id == object)
+        .ok_or_else(|| format!("cannot read a source blob from PR base {revision}"))?;
+    Ok(size)
+}
+
+fn write_blob(blobs: &mut impl BufRead, target: &Path, size: u64, revision: &str) -> Result<()> {
+    let mut output = File::create(target)?;
+    if io::copy(&mut blobs.by_ref().take(size), &mut output)? != size {
+        return Err(format!("incomplete source blob from PR base {revision}").into());
+    }
+    let mut newline = [0];
+    blobs.read_exact(&mut newline)?;
+    if newline != [b'\n'] {
+        return Err(format!("invalid source blob from PR base {revision}").into());
     }
     Ok(())
 }

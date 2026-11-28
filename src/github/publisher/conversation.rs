@@ -175,6 +175,47 @@ fn publish() -> Result<String> {
     let path = env_path("FINDINGS_REPORT").map_err(|_| Error::Metadata)?;
     let (report, _) = evidence::bounded_json(&path).map_err(|_| Error::Metadata)?;
     let findings = evidence::findings(&report).ok_or(Error::Metadata)?;
+    let manifest = verified_manifest(&target, findings)?;
+    publish_evidence(
+        &api,
+        &base_url,
+        &config,
+        &target,
+        &verify_current,
+        &manifest,
+        findings,
+    )
+}
+
+fn publish_evidence(
+    api: &GitHub,
+    base_url: &str,
+    config: &Config,
+    target: &Target,
+    verify_current: &dyn Fn() -> Result<()>,
+    manifest: &evidence::Manifest,
+    findings: &[Value],
+) -> Result<String> {
+    let slug = optional("APP_SLUG");
+    let actor = slug
+        .as_deref()
+        .map(|slug| verified_app_actor(api, slug))
+        .transpose()?;
+    let writes = GitHub::new(base_url, &config.repository, required("APP_TOKEN")?);
+    let publication = Publication {
+        writes: &writes,
+        repository: &config.repository,
+        target,
+        verify: verify_current,
+        paths: &manifest.compatible_paths,
+        app_id: app_id()?,
+        actor,
+    };
+    publication.reconcile(findings)?;
+    Ok("Published PR conversations from the verified scan.".to_owned())
+}
+
+fn verified_manifest(target: &Target, findings: &[Value]) -> Result<evidence::Manifest> {
     if findings.iter().any(|item| item["status"] == "blocking")
         != (target.outcome() == Outcome::Blocking)
     {
@@ -191,23 +232,7 @@ fn publish() -> Result<String> {
             "The source coordinate manifest does not match the verified PR target.",
         ));
     }
-    let slug = optional("APP_SLUG");
-    let actor = slug
-        .as_deref()
-        .map(|slug| verified_app_actor(&api, slug))
-        .transpose()?;
-    let writes = GitHub::new(&base_url, &config.repository, required("APP_TOKEN")?);
-    let publication = Publication {
-        writes: &writes,
-        repository: &config.repository,
-        target: &target,
-        verify: &verify_current,
-        paths: &manifest.compatible_paths,
-        app_id: app_id()?,
-        actor,
-    };
-    publication.reconcile(findings)?;
-    Ok("Published PR conversations from the verified scan.".to_owned())
+    Ok(manifest)
 }
 
 pub fn publish_action() -> u8 {
@@ -405,6 +430,19 @@ struct Publication<'a> {
     actor: Option<(String, u64)>,
 }
 
+type Summary<'a> = Vec<(&'static str, &'a Value)>;
+type Blocking<'a> = Vec<(String, &'a Value)>;
+
+struct Feedback<'a, 'b> {
+    files: &'a [Value],
+    hunk: &'a Regex,
+    active: &'a BTreeMap<&'a str, (&'a Value, &'a Value)>,
+    order_marker: &'a str,
+    review_path: &'a str,
+    count: usize,
+    summary: &'a mut Summary<'b>,
+}
+
 impl Publication<'_> {
     fn owns(&self, comment: &Value) -> bool {
         comment["performed_via_github_app"]["id"] == self.app_id
@@ -472,47 +510,12 @@ impl Publication<'_> {
         Ok(())
     }
 
-    fn reconcile(&self, findings: &[Value]) -> Result<()> {
-        let number = self.target.candidate.number;
-        let files = self
-            .writes
-            .pages(&format!("/pulls/{number}/files"), "files")?;
-        let mut summary = Vec::new();
-        let mut blocking = Vec::new();
-        let mut counts = BTreeMap::new();
-        for finding in findings {
-            match finding["status"].as_str() {
-                Some("reported") => summary.push(("Warning", finding)),
-                Some("blocking") => {
-                    let key = identity(finding);
-                    *counts.entry(key.clone()).or_insert(0) += 1;
-                    blocking.push((key, finding));
-                }
-                _ => {}
-            }
-        }
-        for (identity, finding) in &mut blocking {
-            if counts[identity] > 1 && finding["rule"] != "source-duplication" {
-                *identity = digest(&identity_json(&json!([identity, finding["range"]]), true));
-            }
-        }
-        let blockers: BTreeSet<_> = blocking
-            .iter()
-            .map(|(identity, _)| identity.as_str())
-            .collect();
-
-        let review_path = format!("/pulls/{number}/comments");
-        let summary_path = format!("/issues/{number}/comments");
-        let review_comments = self.writes.pages(&review_path, "comments")?;
-        let issue_comments = self.writes.pages(&summary_path, "comments")?;
-        let review_comments: Vec<_> = review_comments
-            .iter()
-            .filter(|item| self.owns(item))
-            .collect();
-        let issue_comments: Vec<_> = issue_comments
-            .iter()
-            .filter(|item| self.owns(item))
-            .collect();
+    fn reserve_summary(
+        &self,
+        review_comments: &[&Value],
+        issue_comments: &[&Value],
+        summary_path: &str,
+    ) -> Result<(String, u64)> {
         let order = (
             self.target.run.run_number,
             self.target.run.identity.run_attempt,
@@ -522,7 +525,7 @@ impl Publication<'_> {
             Regex::new(r"<!-- lint-gate-feedback:v1:([0-9]+):([0-9]+):([0-9]+) -->").unwrap();
         if review_comments
             .iter()
-            .chain(&issue_comments)
+            .chain(issue_comments)
             .filter_map(|item| read_order(&order_pattern, body(item)))
             .any(|recorded| recorded > order)
         {
@@ -553,13 +556,157 @@ impl Publication<'_> {
             id
         } else {
             self.send(
-                &summary_path,
+                summary_path,
                 "POST",
                 &json!({"body": format!("{order_marker}\n{SUMMARY_MARKER}")}),
             )?["id"]
                 .as_u64()
                 .ok_or(Error::Metadata)?
         };
+
+        Ok((order_marker, summary_id))
+    }
+
+    fn post_finding<'a>(
+        &self,
+        identity: &str,
+        finding: &'a Value,
+        anchor: Option<Anchor>,
+        feedback: &mut Feedback<'_, 'a>,
+    ) -> Result<()> {
+        if let Some(anchor) = anchor {
+            if feedback.count >= MAX_THREADS {
+                feedback
+                    .summary
+                    .push(("Blocking error (thread limit reached)", finding));
+                return Ok(());
+            }
+            let text = thread_body(
+                feedback.order_marker,
+                identity,
+                finding,
+                &anchor,
+                &self.target.details_url,
+            );
+            let mut payload =
+                json!({"body": text, "commit_id": self.target.head, "path": anchor.path});
+            if let Some(line) = anchor.line {
+                payload["line"] = json!(line);
+                payload["side"] = json!("RIGHT");
+            } else {
+                payload["subject_type"] = json!("file");
+            }
+            match self.send(feedback.review_path, "POST", &payload) {
+                Ok(_) => {
+                    feedback.count += 1;
+                    return Ok(());
+                }
+                Err(Error::Status {
+                    status: 404 | 422, ..
+                }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        feedback
+            .summary
+            .push(("Unanchored blocking error", finding));
+        Ok(())
+    }
+
+    fn reconcile_finding<'a>(
+        &self,
+        identity: &str,
+        finding: &'a Value,
+        feedback: &mut Feedback<'_, 'a>,
+    ) -> Result<()> {
+        let anchor = anchor(finding, feedback.files, self.paths, feedback.hunk);
+        if let Some((thread, existing)) = feedback.active.get(identity) {
+            if let Some(anchor) = anchor.as_ref().filter(|anchor| {
+                existing["path"] == anchor.path && existing["line"].as_u64() == anchor.line
+            }) {
+                if resolved(thread) {
+                    if feedback.count >= MAX_THREADS {
+                        feedback
+                            .summary
+                            .push(("Blocking error (thread limit reached)", finding));
+                        return Ok(());
+                    }
+                    self.resolve(thread, false)?;
+                    feedback.count += 1;
+                }
+                let text = thread_body(
+                    feedback.order_marker,
+                    identity,
+                    finding,
+                    anchor,
+                    &self.target.details_url,
+                );
+                if body(existing) != text {
+                    let id = existing["id"].as_u64().ok_or(Error::Metadata)?;
+                    self.send(
+                        &format!("/pulls/comments/{id}"),
+                        "PATCH",
+                        &json!({"body": text}),
+                    )?;
+                }
+                return Ok(());
+            }
+            if !resolved(thread) {
+                self.resolve(thread, true)?;
+                feedback.count -= 1;
+            }
+        }
+        self.post_finding(identity, finding, anchor, feedback)?;
+        Ok(())
+    }
+
+    fn finish_reconciliation(
+        &self,
+        active: BTreeMap<&str, (&Value, &Value)>,
+        blockers: &BTreeSet<&str>,
+        order_marker: &str,
+        summary_id: u64,
+        summary: &[(&str, &Value)],
+    ) -> Result<()> {
+        for (identity, (thread, _)) in active {
+            if !blockers.contains(identity) && !resolved(thread) {
+                self.resolve(thread, true)?;
+            }
+        }
+        let text = summary_body(order_marker, &self.target.details_url, summary);
+        self.send(
+            &format!("/issues/comments/{summary_id}"),
+            "PATCH",
+            &json!({"body": text}),
+        )?;
+        Ok(())
+    }
+
+    fn reconcile(&self, findings: &[Value]) -> Result<()> {
+        let number = self.target.candidate.number;
+        let files = self
+            .writes
+            .pages(&format!("/pulls/{number}/files"), "files")?;
+        let (mut summary, blocking) = classify_findings(findings);
+        let blockers: BTreeSet<_> = blocking
+            .iter()
+            .map(|(identity, _)| identity.as_str())
+            .collect();
+
+        let review_path = format!("/pulls/{number}/comments");
+        let summary_path = format!("/issues/{number}/comments");
+        let review_comments = self.writes.pages(&review_path, "comments")?;
+        let issue_comments = self.writes.pages(&summary_path, "comments")?;
+        let review_comments: Vec<_> = review_comments
+            .iter()
+            .filter(|item| self.owns(item))
+            .collect();
+        let issue_comments: Vec<_> = issue_comments
+            .iter()
+            .filter(|item| self.owns(item))
+            .collect();
+        let (order_marker, summary_id) =
+            self.reserve_summary(&review_comments, &issue_comments, &summary_path)?;
 
         let marker = Regex::new(r"<!-- lint-gate-finding:([0-9a-f]{64}) -->").unwrap();
         let comments: BTreeMap<_, _> = review_comments
@@ -572,94 +719,50 @@ impl Publication<'_> {
         let threads = self.threads()?;
         (self.verify)()?;
         let active = active_threads(&threads, &comments)?;
-        let mut count = active
+        let count = active
             .iter()
             .filter(|(identity, (thread, _))| blockers.contains(**identity) && !resolved(thread))
             .count();
         let hunk = Regex::new(r"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@").unwrap();
 
+        let mut feedback = Feedback {
+            files: &files,
+            hunk: &hunk,
+            active: &active,
+            order_marker: &order_marker,
+            review_path: &review_path,
+            count,
+            summary: &mut summary,
+        };
         for (identity, finding) in &blocking {
-            let anchor = anchor(finding, &files, self.paths, &hunk);
-            if let Some((thread, existing)) = active.get(identity.as_str()) {
-                if let Some(anchor) = anchor.as_ref().filter(|anchor| {
-                    existing["path"] == anchor.path && existing["line"].as_u64() == anchor.line
-                }) {
-                    if resolved(thread) {
-                        if count >= MAX_THREADS {
-                            summary.push(("Blocking error (thread limit reached)", *finding));
-                            continue;
-                        }
-                        self.resolve(thread, false)?;
-                        count += 1;
-                    }
-                    let text = thread_body(
-                        &order_marker,
-                        identity,
-                        finding,
-                        anchor,
-                        &self.target.details_url,
-                    );
-                    if body(existing) != text {
-                        let id = existing["id"].as_u64().ok_or(Error::Metadata)?;
-                        self.send(
-                            &format!("/pulls/comments/{id}"),
-                            "PATCH",
-                            &json!({"body": text}),
-                        )?;
-                    }
-                    continue;
-                }
-                if !resolved(thread) {
-                    self.resolve(thread, true)?;
-                    count -= 1;
-                }
-            }
-            if let Some(anchor) = anchor {
-                if count >= MAX_THREADS {
-                    summary.push(("Blocking error (thread limit reached)", *finding));
-                    continue;
-                }
-                let text = thread_body(
-                    &order_marker,
-                    identity,
-                    finding,
-                    &anchor,
-                    &self.target.details_url,
-                );
-                let mut payload =
-                    json!({"body": text, "commit_id": self.target.head, "path": anchor.path});
-                if let Some(line) = anchor.line {
-                    payload["line"] = json!(line);
-                    payload["side"] = json!("RIGHT");
-                } else {
-                    payload["subject_type"] = json!("file");
-                }
-                match self.send(&review_path, "POST", &payload) {
-                    Ok(_) => {
-                        count += 1;
-                        continue;
-                    }
-                    Err(Error::Status {
-                        status: 404 | 422, ..
-                    }) => {}
-                    Err(error) => return Err(error),
-                }
-            }
-            summary.push(("Unanchored blocking error", *finding));
+            self.reconcile_finding(identity, finding, &mut feedback)?;
         }
-        for (identity, (thread, _)) in active {
-            if !blockers.contains(identity) && !resolved(thread) {
-                self.resolve(thread, true)?;
-            }
-        }
-        let text = summary_body(&order_marker, &self.target.details_url, &summary);
-        self.send(
-            &format!("/issues/comments/{summary_id}"),
-            "PATCH",
-            &json!({"body": text}),
-        )?;
+        self.finish_reconciliation(active, &blockers, &order_marker, summary_id, &summary)?;
         Ok(())
     }
+}
+
+fn classify_findings(findings: &[Value]) -> (Summary<'_>, Blocking<'_>) {
+    let mut summary = Vec::new();
+    let mut blocking = Vec::new();
+    let mut counts = BTreeMap::new();
+    for finding in findings {
+        match finding["status"].as_str() {
+            Some("reported") => summary.push(("Warning", finding)),
+            Some("blocking") => {
+                let key = identity(finding);
+                *counts.entry(key.clone()).or_insert(0) += 1;
+                blocking.push((key, finding));
+            }
+            _ => {}
+        }
+    }
+    for (identity, finding) in &mut blocking {
+        if counts[identity] > 1 && finding["rule"] != "source-duplication" {
+            *identity = digest(&identity_json(&json!([identity, finding["range"]]), true));
+        }
+    }
+    (summary, blocking)
 }
 
 fn read_order(pattern: &Regex, text: &str) -> Option<Order> {
