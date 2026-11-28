@@ -2,6 +2,7 @@ mod analyzer;
 mod cognitive;
 mod comparison;
 mod duplication;
+mod github;
 mod grammar;
 mod model;
 mod policy;
@@ -28,6 +29,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(flatten)]
+    Github(GithubCommand),
+
     /// Scan source and write the complete JSON report to stdout.
     Scan {
         #[command(flatten)]
@@ -66,6 +70,24 @@ enum Command {
         #[command(flatten)]
         settings: Settings,
     },
+}
+
+#[derive(Subcommand)]
+enum GithubCommand {
+    #[command(name = "github-scan", hide = true)]
+    Scan,
+    #[command(name = "github-app-report", hide = true)]
+    AppReport,
+    #[command(name = "github-publish", hide = true)]
+    Publish,
+    #[command(name = "github-prepare-conversation", hide = true)]
+    PrepareConversation,
+    #[command(name = "github-stage-evidence", hide = true)]
+    StageEvidence,
+    #[command(name = "github-rescan", hide = true)]
+    Rescan { analyzer: PathBuf },
+    #[command(name = "github-publish-conversation", hide = true)]
+    PublishConversation,
 }
 
 #[derive(Args)]
@@ -117,7 +139,7 @@ impl Settings {
     }
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Status {
     Reported,
@@ -715,6 +737,7 @@ fn write_json(mut output: impl Write, value: &impl Serialize) -> io::Result<()> 
 fn run(command: Command) -> io::Result<u8> {
     let mut report = Report::new();
     match command {
+        Command::Github(command) => return Ok(run_github(command)),
         Command::Scan { settings, paths } => {
             if let Err(diagnostic) = scan(&settings, &paths, &mut report, false) {
                 report.diagnostics.push(diagnostic);
@@ -740,33 +763,59 @@ fn run(command: Command) -> io::Result<u8> {
                 report.diagnostics.push(diagnostic);
             }
         }
-        Command::Baseline { input, paths } => {
-            match generate(&input, &paths, &mut report) {
-                Ok(Some(baseline)) => {
-                    io::stdout().lock().write_all(&baseline)?;
-                    return Ok(0);
-                }
-                Ok(None) => {}
-                Err(diagnostic) => report.diagnostics.push(diagnostic),
-            }
-            write_json(io::stderr().lock(), &report)?;
-            return Ok(2);
-        }
-        Command::BaselineReview { settings } => {
-            match review_baseline(&settings, &mut report) {
-                Ok(Some(patch)) => {
-                    write_json(io::stdout().lock(), &patch)?;
-                    return Ok(0);
-                }
-                Ok(None) => {}
-                Err(diagnostic) => report.diagnostics.push(diagnostic),
-            }
-            write_json(io::stderr().lock(), &report)?;
-            return Ok(2);
-        }
+        Command::Baseline { input, paths } => return baseline_output(input, paths),
+        Command::BaselineReview { settings } => return review_output(settings),
     }
     write_json(io::stdout().lock(), &report)?;
     Ok(report.status())
+}
+
+fn run_github(command: GithubCommand) -> u8 {
+    match command {
+        GithubCommand::Scan => github::scan_action(),
+        GithubCommand::AppReport => match github::app_report::normalize_action() {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("lint-gate: {error}");
+                1
+            }
+        },
+        GithubCommand::Publish => github::publisher::publish_action(),
+        GithubCommand::PrepareConversation => github::publisher::conversation::prepare_action(),
+        GithubCommand::PublishConversation => github::publisher::conversation::publish_action(),
+        GithubCommand::StageEvidence => github::evidence::action(github::evidence::stage),
+        GithubCommand::Rescan { analyzer } => {
+            github::evidence::action(|| github::evidence::rescan(&analyzer))
+        }
+    }
+}
+
+fn baseline_output(input: ConfigInput, paths: Vec<PathBuf>) -> io::Result<u8> {
+    let mut report = Report::new();
+    match generate(&input, &paths, &mut report) {
+        Ok(Some(baseline)) => {
+            io::stdout().lock().write_all(&baseline)?;
+            return Ok(0);
+        }
+        Ok(None) => {}
+        Err(diagnostic) => report.diagnostics.push(diagnostic),
+    }
+    write_json(io::stderr().lock(), &report)?;
+    Ok(2)
+}
+
+fn review_output(settings: Settings) -> io::Result<u8> {
+    let mut report = Report::new();
+    match review_baseline(&settings, &mut report) {
+        Ok(Some(patch)) => {
+            write_json(io::stdout().lock(), &patch)?;
+            return Ok(0);
+        }
+        Ok(None) => {}
+        Err(diagnostic) => report.diagnostics.push(diagnostic),
+    }
+    write_json(io::stderr().lock(), &report)?;
+    Ok(2)
 }
 
 fn main() -> ExitCode {

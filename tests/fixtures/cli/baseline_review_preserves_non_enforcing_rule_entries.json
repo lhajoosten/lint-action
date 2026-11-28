@@ -1,0 +1,65 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {\"python\": 1}, \"duplication\": {\"minimum_tokens\": 10}}"},
+      "$TREE0/a.ts": {"text": "function first() { prepare(item); send(item); }"},
+      "$TREE0/b.ts": {"text": "function second() { prepare(item); send(item); }"},
+      "$TREE0/debt.py": {"text": "def f(x): return 1 if x else 0\n"}
+    },
+    "args": ["baseline","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "scoring_version": 1,
+      "entries": [{"rule": "cyclomatic-complexity","identity": {"path": "debt.py","language": "python","scope": [{"kind": "function","name": "f"}]},"score": 2}],
+      "duplication_entries": [
+        {
+          "occurrences": [
+            {"path": "a.ts","language": "typescript","scope": [{"kind": "function","name": "first"}]},
+            {"path": "b.ts","language": "typescript","scope": [{"kind": "function","name": "second"}]}
+          ],
+          "score": 10,
+          "tokens": [
+            "identifier\u0000prepare",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;",
+            "identifier\u0000send",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;"
+          ]
+        }
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\n  \"scoring_version\": 1,\n  \"entries\": [\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"debt.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"f\"\n          }\n        ]\n      },\n      \"score\": 2\n    }\n  ],\n  \"duplication_entries\": [\n    {\n      \"occurrences\": [\n        {\n          \"path\": \"a.ts\",\n          \"language\": \"typescript\",\n          \"scope\": [\n            {\n              \"kind\": \"function\",\n              \"name\": \"first\"\n            }\n          ]\n        },\n        {\n          \"path\": \"b.ts\",\n          \"language\": \"typescript\",\n          \"scope\": [\n            {\n              \"kind\": \"function\",\n              \"name\": \"second\"\n            }\n          ]\n        }\n      ],\n      \"score\": 10,\n      \"tokens\": [\n        \"identifier\\u0000prepare\",\n        \"(\\u0000(\",\n        \"identifier\\u0000item\",\n        \")\\u0000)\",\n        \";\\u0000;\",\n        \"identifier\\u0000send\",\n        \"(\\u0000(\",\n        \"identifier\\u0000item\",\n        \")\\u0000)\",\n        \";\\u0000;\"\n      ]\n    }\n  ]\n}\n"
+      },
+      "$TREE0/.lint-action.json": {
+        "text": "{\"mode\": \"baseline\", \"limits\": {\"python\": 1}, \"severities\": {\"cyclomatic-complexity\": \"pass\", \"source-duplication\": \"warn\"}, \"duplication\": {\"minimum_tokens\": 10}}"
+      },
+      "$TREE0/b.ts": {"text": "function second() { return 0; }"},
+      "$TREE0/debt.py": {"text": "def f(x): return x\n"}
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [],
+    "stderr": "baseline-review: deferred inactive complexity rule CyclomaticComplexity for debt.py\nbaseline-review: deferred inactive duplication rule for a.ts and b.ts\n"
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {
+        "text": "{\"mode\": \"baseline\", \"limits\": {\"python\": 1}, \"severities\": {\"cyclomatic-complexity\": \"warn\", \"source-duplication\": \"pass\"}, \"duplication\": {\"minimum_tokens\": 10}}"
+      }
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [],
+    "stderr": "baseline-review: deferred inactive complexity rule CyclomaticComplexity for debt.py\nbaseline-review: deferred inactive duplication rule for a.ts and b.ts\n"
+  }
+]

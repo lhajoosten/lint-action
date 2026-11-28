@@ -47,26 +47,22 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          import tomllib
-
-          tag = os.environ["TAG"]
-          version = tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"]
-          if tag != f"v{version}":
-              raise SystemExit(f"Release tag {tag} must match Cargo package version {version}.")
-          metadata = [name for name in ("action.yml", "action.yaml") if Path(name).is_file()]
-          if len(metadata) != 1:
-              raise SystemExit("Marketplace requires exactly one action metadata file at the repository root.")
-          PY
-      - name: Build the locked release and run Action fixtures
-        run: |
           rustup toolchain install 1.88.0 --profile minimal
-          cargo +1.88.0 build --locked --release
-          export LINT_GATE_BIN="$PWD/target/release/lint-gate"
-          python3 tests/cli.py
-          python3 tests/action_test.py
+          version=$(cargo +1.88.0 metadata --locked --no-deps --format-version 1 | jq -er '.packages[0].version')
+          if [[ "$TAG" != "v$version" ]]; then
+            echo "Release tag $TAG must match Cargo package version $version." >&2
+            exit 1
+          fi
+          files=0
+          for file in action.yml action.yaml; do
+            if [[ -f "$file" ]]; then files=$((files + 1)); fi
+          done
+          if [[ "$files" != 1 ]]; then
+            echo 'Marketplace requires exactly one action metadata file at the repository root.' >&2
+            exit 1
+          fi
+      - name: Build the locked release and run Action fixtures
+        run: cargo +1.88.0 test --locked --release --test cli --test action-fixture
       - name: Link to Marketplace publication
         env:
           TAG: ${{ steps.release.outputs.tag }}

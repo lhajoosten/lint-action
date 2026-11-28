@@ -1,0 +1,37 @@
+[
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {\"typescript\": 1}}"},"$TREE0/callback.ts": {"text": "consume(() => a || b);"}},
+    "args": ["baseline","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"scoring_version": 1,"entries": []},
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action-baseline.json": {"text": "{\"scoring_version\": 1, \"entries\": []}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 1,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "callback.ts",
+          "language": "typescript",
+          "scope": [{"kind": "arrow","name": "<anonymous>"}],
+          "name": "<anonymous>",
+          "range": {"start": {"line": 1,"column": 9},"end": {"line": 1,"column": 21}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  }
+]

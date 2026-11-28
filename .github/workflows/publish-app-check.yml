@@ -65,6 +65,10 @@ jobs:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           persist-credentials: false
+      - name: Build the trusted publisher
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 build --locked --release --target-dir "$RUNNER_TEMP/lint-gate-publisher-build"
       - name: Create the repository-scoped installation token
         id: installation
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -83,7 +87,7 @@ jobs:
           SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
           SCANNER_WORKFLOW: ${{ inputs.scanner-workflow }}
           ANALYSIS_JOB: ${{ inputs.analysis-job }}
-        run: python3 -Es action/publish_advisory.py
+        run: '"$RUNNER_TEMP/lint-gate-publisher-build/release/lint-gate" github-publish'
 
   scan:
     if: >-
@@ -116,6 +120,11 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: publisher-tool
           persist-credentials: false
+      - name: Build the trusted publisher
+        working-directory: publisher-tool
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 build --locked --release --target-dir "$RUNNER_TEMP/lint-gate-publisher-build"
       - name: Verify the completed scan and current PR
         id: verify
         working-directory: publisher-tool
@@ -124,7 +133,7 @@ jobs:
           SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
           SCANNER_WORKFLOW: ${{ inputs.scanner-workflow }}
           ANALYSIS_JOB: ${{ inputs.analysis-job }}
-        run: python3 -Es action/prepare_pr_scan.py
+        run: '"$RUNNER_TEMP/lint-gate-publisher-build/release/lint-gate" github-prepare-conversation'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.verify.outputs.ready == 'true' && steps.verify.outputs.scan_complete == 'true'
         with:
@@ -153,8 +162,10 @@ jobs:
         working-directory: scanner-tool
         env:
           LINT_GATE_REPOSITORY: candidate
-          LINT_GATE_PR_BASE: ${{ steps.verify.outputs.base }}
-        run: python3 -I action/run.py "$RUNNER_TEMP/lint-gate-build/release/lint-gate"
+          VERIFIED_BASE: ${{ steps.verify.outputs.base }}
+          VERIFIED_REVISION: ${{ steps.verify.outputs.revision }}
+        run: |
+          "$RUNNER_TEMP/lint-gate-publisher-build/release/lint-gate" github-rescan "$RUNNER_TEMP/lint-gate-build/release/lint-gate"
       - name: Mark the independent scan complete
         id: ready
         if: steps.rescan.outputs.outcome == '0' || steps.rescan.outputs.outcome == '1'
@@ -168,7 +179,9 @@ jobs:
           VERIFIED_HEAD: ${{ steps.verify.outputs.head }}
           SOURCE_RUN: ${{ steps.verify.outputs.source_run }}
           SOURCE_ATTEMPT: ${{ steps.verify.outputs.source_attempt }}
-        run: python3 -Es publisher-tool/action/stage_evidence.py "${{ steps.rescan.outputs.report }}" candidate
+          LINT_GATE_REPOSITORY: candidate
+          SCAN_REPORT: ${{ steps.rescan.outputs.report }}
+        run: '"$RUNNER_TEMP/lint-gate-publisher-build/release/lint-gate" github-stage-evidence'
       - name: Upload trusted scan evidence
         if: >-
           steps.rescan.outputs.outcome == '0' || steps.rescan.outputs.outcome == '1'
@@ -214,6 +227,10 @@ jobs:
         with:
           name: ${{ needs.scan.outputs.artifact_name }}
           path: ${{ runner.temp }}/lint-gate-findings
+      - name: Build the trusted publisher
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 build --locked --release --target-dir "$RUNNER_TEMP/lint-gate-publisher-build"
       - name: Create the repository-scoped installation token
         if: inputs.enabled
         id: installation
@@ -248,4 +265,4 @@ jobs:
           DETAILS_URL: ${{ needs.scan.outputs.details_url }}
           SOURCE_OUTCOME: ${{ needs.scan.outputs.source_outcome }}
           SCAN_COMPLETE: ${{ needs.scan.outputs.scan_complete }}
-        run: python3 -Es action/publish.py
+        run: '"$RUNNER_TEMP/lint-gate-publisher-build/release/lint-gate" github-publish-conversation'

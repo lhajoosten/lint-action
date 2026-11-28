@@ -1,0 +1,294 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"rust\": 1, \"typescript\": 1, \"tsx\": 1, \"python\": 1}}"},
+      "$TREE0/a.ts": {"text": "function first() { prepare(item); send(item); cleanup(item); }"},
+      "$TREE0/b.ts": {"text": "function second() { send(item); cleanup(item); }"},
+      "$TREE1/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 10}}"},
+      "$TREE1/a.ts": {"text": "function first() { prepare(item); send(item); cleanup(item); }"},
+      "$TREE1/b.ts": {"text": "function second() { prepare(item); send(item); cleanup(item); }"}
+    },
+    "args": ["compare","--root","$TREE0","--base-root","$TREE1"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 35},"end": {"line": 1,"column": 61}}},
+            {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 47}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [],
+      "comparison": {
+        "format_version": 1,
+        "status": "complete",
+        "base_revision": null,
+        "candidate_revision": null,
+        "base_diagnostics": [],
+        "unchanged": 0,
+        "changes": [
+          {
+            "category": "improved",
+            "match_status": "matched",
+            "rule": "source-duplication",
+            "limit": 10,
+            "previous": {
+              "score": 15,
+              "status": "blocking",
+              "occurrences": [
+                {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}},
+                {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 62}}}
+              ]
+            },
+            "current": {
+              "score": 10,
+              "status": "blocking",
+              "occurrences": [
+                {"path": "a.ts","range": {"start": {"line": 1,"column": 35},"end": {"line": 1,"column": 61}}},
+                {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 47}}}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/b.ts": {"text": "function second() { prepare(item); send(item); cleanup(item); }"},
+      "$TREE1/b.ts": {"text": "function second() { send(item); cleanup(item); }"}
+    },
+    "args": ["compare","--root","$TREE0","--base-root","$TREE1"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 15,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}},
+            {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 62}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [],
+      "comparison": {
+        "format_version": 1,
+        "status": "complete",
+        "base_revision": null,
+        "candidate_revision": null,
+        "base_diagnostics": [],
+        "unchanged": 0,
+        "changes": [
+          {
+            "category": "worsened",
+            "match_status": "matched",
+            "rule": "source-duplication",
+            "limit": 10,
+            "previous": {
+              "score": 10,
+              "status": "blocking",
+              "occurrences": [
+                {"path": "a.ts","range": {"start": {"line": 1,"column": 35},"end": {"line": 1,"column": 61}}},
+                {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 47}}}
+              ]
+            },
+            "current": {
+              "score": 15,
+              "status": "blocking",
+              "occurrences": [
+                {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}},
+                {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 62}}}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/b.ts": {"text": "\nfunction second() { prepare(item); send(item); cleanup(item); }"},
+      "$TREE0/c.ts": {"text": "function third() { prepare(item); send(item); cleanup(item); }"},
+      "$TREE1/b.ts": {"text": "function second() { prepare(item); send(item); cleanup(item); }"}
+    },
+    "args": ["compare","--root","$TREE0","--base-root","$TREE1"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 3,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 15,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}},
+            {"path": "b.ts","range": {"start": {"line": 2,"column": 21},"end": {"line": 2,"column": 62}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 15,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}},
+            {"path": "c.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 15,
+          "occurrences": [
+            {"path": "b.ts","range": {"start": {"line": 2,"column": 21},"end": {"line": 2,"column": 62}}},
+            {"path": "c.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [],
+      "comparison": {
+        "format_version": 1,
+        "status": "complete",
+        "base_revision": null,
+        "candidate_revision": null,
+        "base_diagnostics": [],
+        "unchanged": 1,
+        "changes": [
+          {
+            "category": "new",
+            "match_status": "unmatched",
+            "rule": "source-duplication",
+            "limit": 10,
+            "previous": null,
+            "current": {
+              "score": 15,
+              "status": "blocking",
+              "occurrences": [
+                {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}},
+                {"path": "c.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}}
+              ]
+            }
+          },
+          {
+            "category": "new",
+            "match_status": "unmatched",
+            "rule": "source-duplication",
+            "limit": 10,
+            "previous": null,
+            "current": {
+              "score": 15,
+              "status": "blocking",
+              "occurrences": [
+                {"path": "b.ts","range": {"start": {"line": 2,"column": 21},"end": {"line": 2,"column": 62}}},
+                {"path": "c.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/c.ts": null,
+      "$TREE0/a.ts": {"text": "function first() { prepare(other); send(other); cleanup(other); }"},
+      "$TREE0/b.ts": {"text": "function second() { prepare(other); send(other); cleanup(other); }"}
+    },
+    "args": ["compare","--root","$TREE0","--base-root","$TREE1"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 15,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 64}}},
+            {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 65}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [],
+      "comparison": {
+        "format_version": 1,
+        "status": "complete",
+        "base_revision": null,
+        "candidate_revision": null,
+        "base_diagnostics": [],
+        "unchanged": 0,
+        "changes": [
+          {
+            "category": "new",
+            "match_status": "unmatched",
+            "rule": "source-duplication",
+            "limit": 10,
+            "previous": null,
+            "current": {
+              "score": 15,
+              "status": "blocking",
+              "occurrences": [
+                {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 64}}},
+                {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 65}}}
+              ]
+            }
+          },
+          {
+            "category": "removed",
+            "match_status": "unmatched",
+            "rule": "source-duplication",
+            "limit": 10,
+            "previous": {
+              "score": 15,
+              "status": "blocking",
+              "occurrences": [
+                {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 61}}},
+                {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 62}}}
+              ]
+            },
+            "current": null
+          }
+        ]
+      }
+    },
+    "stderr": null
+  }
+]

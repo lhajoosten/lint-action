@@ -1,6 +1,6 @@
 # Publish Lint Gate checks with a GitHub App
 
-The optional publisher adds **Lint Gate (advisory)** under your App's identity. Require the native Actions analysis job in your ruleset for policy enforcement; the advisory App check is not a substitute. The App check links to the exact Actions run attempt and reports clean scans, warnings, blocking policy findings, incomplete analysis, and policy bootstrap. The advisory check uses a neutral conclusion for warnings, blocking findings, and incomplete results.
+The optional publisher adds **Lint Gate (advisory)** under your App's identity. Require the native Actions analysis job in your ruleset for policy enforcement; the advisory App check is not a substitute. The App check links to the exact Actions run attempt and reports clean scans, warnings, blocking policy findings, incomplete analysis, and policy bootstrap. The advisory check uses a neutral conclusion for warnings and a failure conclusion for blocking findings and incomplete analysis.
 
 ## Set up the App
 
@@ -62,3 +62,18 @@ The pilot pins the reusable scanner to the same reviewed commit SHA in both call
 - Rerun all jobs for one PR. Confirm the existing check updates to the new attempt without duplicating.
 - Exercise a policy violation and confirm that the native Actions job still controls the required check. Check a run with publishing disabled or a missing App ID to confirm that the analysis outcome is independent of publication.
 - On a pilot branch, require the native Actions analysis job and enable GitHub's conversation-resolution requirement. Confirm unresolved blocking threads participate in merge protection, warnings do not, and manually resolving an active blocking thread does not pass the native Actions gate.
+
+## Upgrade and rollback
+
+When upgrading to the Rust-based GitHub integration, select a reviewed
+provider revision that contains the reusable scanner and publisher. Keep the
+scanner caller's ref and the publisher's expected scanner ref aligned. The
+Rust integration uses the existing report artifact version, step names, and
+workflow inputs, so existing policy, baselines, check names, and App
+permissions carry forward.
+
+Verify the pilot with the existing App installation before promoting the
+provider ref. Record the exact scanner and publisher revisions used. To roll
+back, restore the previous scanner ref in both callers and select the
+previous publisher revision if it changed. Consumers that pin a full SHA can
+adopt or roll back by updating those pins together.

@@ -1,0 +1,60 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {\"typescript\": 2}, \"include\": [\"src/**\"], \"exclude\": [\"src/skipped/**\"]}"},
+      "$TREE0/elsewhere.ts": {"text": "function {"},
+      "$TREE0/src": {"directory": true},
+      "$TREE0/src/also.tsx": {"text": "this is invalid TSX"},
+      "$TREE0/src/choices.ts": {"text": "const choose = (x: boolean) => x ? 1 : 0;"},
+      "$TREE0/src/skipped": {"directory": true},
+      "$TREE0/src/skipped/choices.ts": {"text": "function {"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "strict","files_scanned": 1,"files_skipped": 3,"findings": [],"diagnostics": []},
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["scan","--root","$TREE0","src/skipped/choices.ts"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 0,
+      "files_skipped": 1,
+      "findings": [],
+      "diagnostics": [{"kind": "empty_scan","message": "no regular files matched the enabled languages and path selection"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {\"typescript\": 1}, \"include\": [\"src/**\"], \"exclude\": [\"src/skipped/**\"]}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 1,
+      "files_skipped": 3,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "src/choices.ts",
+          "language": "typescript",
+          "scope": [{"kind": "arrow","name": "choose"}],
+          "name": "choose",
+          "range": {"start": {"line": 1,"column": 16},"end": {"line": 1,"column": 41}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  }
+]

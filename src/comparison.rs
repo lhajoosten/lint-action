@@ -8,20 +8,20 @@ use std::collections::BTreeMap;
 #[derive(Serialize)]
 pub struct Comparison {
     format_version: u32,
-    status: &'static str,
-    base_revision: Option<String>,
-    candidate_revision: Option<String>,
+    pub(crate) status: &'static str,
+    pub(crate) base_revision: Option<String>,
+    pub(crate) candidate_revision: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<&'static str>,
+    pub(crate) reason: Option<&'static str>,
     pub base_diagnostics: Vec<Diagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    unchanged: Option<usize>,
-    changes: Vec<Change>,
+    pub(crate) unchanged: Option<usize>,
+    pub(crate) changes: Vec<Change>,
 }
 
 #[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum Category {
+pub(crate) enum Category {
     New,
     Worsened,
     Improved,
@@ -31,33 +31,33 @@ enum Category {
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum MatchStatus {
+pub(crate) enum MatchStatus {
     Matched,
     Unmatched,
     Ambiguous,
 }
 
 #[derive(Serialize)]
-struct Change {
-    category: Category,
-    match_status: MatchStatus,
-    rule: Rule,
-    limit: u32,
-    previous: Option<Observation>,
-    current: Option<Observation>,
+pub(crate) struct Change {
+    pub(crate) category: Category,
+    pub(crate) match_status: MatchStatus,
+    pub(crate) rule: Rule,
+    pub(crate) limit: u32,
+    pub(crate) previous: Option<Observation>,
+    pub(crate) current: Option<Observation>,
 }
 
 #[derive(Serialize)]
-struct Observation {
-    score: u64,
-    status: Option<Status>,
+pub(crate) struct Observation {
+    pub(crate) score: u64,
+    pub(crate) status: Option<Status>,
     #[serde(flatten)]
-    location: Location,
+    pub(crate) location: Location,
 }
 
 #[derive(Serialize)]
 #[serde(untagged)]
-enum Location {
+pub(crate) enum Location {
     Callable {
         #[serde(flatten)]
         identity: Identity,

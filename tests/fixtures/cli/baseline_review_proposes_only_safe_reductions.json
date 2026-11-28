@@ -1,0 +1,67 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {\"python\": 1}, \"exclude\": [\"excluded/**\"]}"},
+      "$TREE0/debt.py": {"text": "def f(x):\n    return 1 if x and x > 2 else 0\n"}
+    },
+    "args": ["baseline","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "scoring_version": 1,
+      "entries": [{"rule": "cyclomatic-complexity","identity": {"path": "debt.py","language": "python","scope": [{"kind": "function","name": "f"}]},"score": 3}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\n  \"scoring_version\": 1,\n  \"entries\": [\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"debt.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"f\"\n          }\n        ]\n      },\n      \"score\": 3\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"excluded/debt.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"hidden\"\n          }\n        ]\n      },\n      \"score\": 8\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"not-selected.ts\",\n        \"language\": \"typescript\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"dormant\"\n          }\n        ]\n      },\n      \"score\": 5\n    }\n  ]\n}\n"
+      },
+      "$TREE0/debt.py": {"text": "def f(x):\n    return 1 if x else 0\n"}
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [{"op": "replace","path": "/entries/0/score","value": 2}],
+    "stderr": "baseline-review: deferred complexity entry outside policy selection for excluded/debt.py\nbaseline-review: deferred inactive complexity rule CyclomaticComplexity for not-selected.ts\n"
+  },
+  {
+    "files": {},
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [{"op": "replace","path": "/entries/0/score","value": 2}],
+    "stderr": "baseline-review: deferred complexity entry outside policy selection for excluded/debt.py\nbaseline-review: deferred inactive complexity rule CyclomaticComplexity for not-selected.ts\n"
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\n  \"scoring_version\": 1,\n  \"entries\": [\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"debt.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"f\"\n          }\n        ]\n      },\n      \"score\": 2\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"excluded/debt.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"hidden\"\n          }\n        ]\n      },\n      \"score\": 8\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"not-selected.ts\",\n        \"language\": \"typescript\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"dormant\"\n          }\n        ]\n      },\n      \"score\": 5\n    }\n  ]\n}\n"
+      }
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [],
+    "stderr": "baseline-review: preserved unchanged or worsened callable debt.py ([Scope { kind: \"function\", name: \"f\" }]) at score 2\nbaseline-review: deferred complexity entry outside policy selection for excluded/debt.py\nbaseline-review: deferred inactive complexity rule CyclomaticComplexity for not-selected.ts\n"
+  },
+  {
+    "files": {"$TREE0/debt.py": {"text": "def f(x): return x\n"}},
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [{"op": "remove","path": "/entries/0"}],
+    "stderr": "baseline-review: deferred complexity entry outside policy selection for excluded/debt.py\nbaseline-review: deferred inactive complexity rule CyclomaticComplexity for not-selected.ts\n"
+  },
+  {
+    "files": {"$TREE0/broken.py": {"text": "def broken(:\n"}},
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 2,
+    "stdout": null,
+    "stderr": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 2,
+      "files_skipped": 2,
+      "findings": [],
+      "diagnostics": [{"kind": "parse_error","path": "broken.py","range": {"start": {"line": 1,"column": 12},"end": {"line": 1,"column": 12}},"message": "Tree-sitter expected )"}]
+    }
+  }
+]

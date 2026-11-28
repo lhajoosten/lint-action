@@ -1,0 +1,139 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 20}}"},
+      "$TREE0/copies.ts": {"prefix": "function both() {","repeat": "ping();","count": 2000,"suffix": "}"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 28,
+          "occurrences": [
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 18},"end": {"line": 1,"column": 67}}},
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 67},"end": {"line": 1,"column": 116}}}
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 60,
+          "occurrences": [
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 18},"end": {"line": 1,"column": 123}}},
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 123},"end": {"line": 1,"column": 228}}}
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 124,
+          "occurrences": [
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 18},"end": {"line": 1,"column": 235}}},
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 235},"end": {"line": 1,"column": 452}}}
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 248,
+          "occurrences": [
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 18},"end": {"line": 1,"column": 452}}},
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 452},"end": {"line": 1,"column": 886}}}
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 500,
+          "occurrences": [
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 18},"end": {"line": 1,"column": 893}}},
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 893},"end": {"line": 1,"column": 1768}}}
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 1000,
+          "occurrences": [
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 18},"end": {"line": 1,"column": 1768}}},
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 1768},"end": {"line": 1,"column": 3518}}}
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 2000,
+          "occurrences": [
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 18},"end": {"line": 1,"column": 3518}}},
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 3518},"end": {"line": 1,"column": 7018}}}
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 4000,
+          "occurrences": [
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 18},"end": {"line": 1,"column": 7018}}},
+            {"path": "copies.ts","range": {"start": {"line": 1,"column": 7018},"end": {"line": 1,"column": 14018}}}
+          ],
+          "limit": 20,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/exhausted.ts": {"prefix": "function repeat() {","repeat": "ping();","count": 30000,"suffix": "}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [],
+      "diagnostics": [{"kind": "duplication_limit","message": "source duplication exceeded its analysis budget; narrow the source selection or increase minimum_tokens"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["baseline","--root","$TREE0"],
+    "status": 2,
+    "stdout": null,
+    "stderr": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [],
+      "diagnostics": [{"kind": "duplication_limit","message": "source duplication exceeded its analysis budget; narrow the source selection or increase minimum_tokens"}]
+    }
+  }
+]

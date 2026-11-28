@@ -1,0 +1,199 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 10}, \"exclude\": [\"vendor/**\"]}"},
+      "$TREE0/different.ts": {"text": "function different() { prepare(other); send(\"item\"); }"},
+      "$TREE0/ignored.py": {"text": "def copy(): pass"},
+      "$TREE0/old.ts": {"text": "function old() {\n  const café = 0; prepare(item); send(item);\n}\n"},
+      "$TREE0/src": {"directory": true},
+      "$TREE0/src/new.tsx": {"text": "function copy() {\n  prepare( item ); // comments do not split a match\n  send(item);\n}\nfunction another() { prepare(item); send(item); }\n"},
+      "$TREE0/vendor": {"directory": true},
+      "$TREE0/vendor/ignored.ts": {"text": "function excluded() { prepare(item); send(item); }"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 3,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "old.ts","range": {"start": {"line": 2,"column": 20},"end": {"line": 2,"column": 46}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 14}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "old.ts","range": {"start": {"line": 2,"column": 20},"end": {"line": 2,"column": 46}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 5,"column": 22},"end": {"line": 5,"column": 48}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "src/new.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 14}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 5,"column": 22},"end": {"line": 5,"column": 48}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 3,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "old.ts","range": {"start": {"line": 2,"column": 20},"end": {"line": 2,"column": 46}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 14}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "old.ts","range": {"start": {"line": 2,"column": 20},"end": {"line": 2,"column": 46}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 5,"column": 22},"end": {"line": 5,"column": 48}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "src/new.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 14}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 5,"column": 22},"end": {"line": 5,"column": 48}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["scan","--root","$TREE0","--","src/new.tsx","vendor/ignored.ts"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "src/new.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 14}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 5,"column": 22},"end": {"line": 5,"column": 48}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 11}, \"exclude\": [\"vendor/**\"]}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "strict","files_scanned": 3,"files_skipped": 2,"findings": [],"diagnostics": []},
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 10}, \"exclude\": [\"vendor/**\"]}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 3,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "old.ts","range": {"start": {"line": 2,"column": 20},"end": {"line": 2,"column": 46}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 14}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "old.ts","range": {"start": {"line": 2,"column": 20},"end": {"line": 2,"column": 46}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 5,"column": 22},"end": {"line": 5,"column": 48}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "source-duplication",
+          "score": 10,
+          "occurrences": [
+            {"path": "src/new.tsx","range": {"start": {"line": 2,"column": 3},"end": {"line": 3,"column": 14}}},
+            {"path": "src/new.tsx","range": {"start": {"line": 5,"column": 22},"end": {"line": 5,"column": 48}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {\"typescript\": 100, \"tsx\": 100}, \"exclude\": [\"vendor/**\"]}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {"format_version": 2,"scoring_version": 1,"mode": "strict","files_scanned": 3,"files_skipped": 2,"findings": [],"diagnostics": []},
+    "stderr": null
+  }
+]

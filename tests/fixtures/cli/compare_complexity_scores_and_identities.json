@@ -1,0 +1,751 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"rust\": 1, \"typescript\": 1, \"tsx\": 1, \"python\": 1}}"},
+      "$TREE1/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {\"python\": 2}}"},
+      "$TREE1/ambiguous.py": {"text": "def ambiguous(x):\n    if x: x -= 1\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE1/better.py": {"text": "def better(x):\n    if x: x -= 1\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE1/crossed.py": {"text": "def crossed(x):\n    if x: x -= 1\n    return x\n"},
+      "$TREE1/deleted.py": {"text": "def deleted(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE1/fixed.py": {"text": "def fixed(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE1/old.py": {"text": "def moved(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE1/passing.py": {"text": "def passing(x):\n    return x\n"},
+      "$TREE1/steady.py": {"text": "def steady(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE1/worse.py": {"text": "def worse(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"}
+    },
+    "args": ["baseline","--root","$TREE1"],
+    "status": 0,
+    "stdout": {
+      "scoring_version": 1,
+      "entries": [
+        {"rule": "cyclomatic-complexity","identity": {"path": "ambiguous.py","language": "python","scope": [{"kind": "function","name": "ambiguous"}]},"score": 4},
+        {"rule": "cyclomatic-complexity","identity": {"path": "better.py","language": "python","scope": [{"kind": "function","name": "better"}]},"score": 4},
+        {"rule": "cyclomatic-complexity","identity": {"path": "deleted.py","language": "python","scope": [{"kind": "function","name": "deleted"}]},"score": 3},
+        {"rule": "cyclomatic-complexity","identity": {"path": "fixed.py","language": "python","scope": [{"kind": "function","name": "fixed"}]},"score": 3},
+        {"rule": "cyclomatic-complexity","identity": {"path": "old.py","language": "python","scope": [{"kind": "function","name": "moved"}]},"score": 3},
+        {"rule": "cyclomatic-complexity","identity": {"path": "steady.py","language": "python","scope": [{"kind": "function","name": "steady"}]},"score": 3},
+        {"rule": "cyclomatic-complexity","identity": {"path": "worse.py","language": "python","scope": [{"kind": "function","name": "worse"}]},"score": 3}
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {"text": "invalid"},
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"python\": 999}}"},
+      "$TREE0/ambiguous.py": {"text": "def ambiguous(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\ndef ambiguous(x):\n    return x\n"},
+      "$TREE0/better.py": {"text": "\n\ndef better(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE0/crossed.py": {"text": "\n\ndef crossed(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE0/fixed.py": {"text": "\n\ndef fixed(x):\n    if x: x -= 1\n    return x\n"},
+      "$TREE0/fresh.py": {"text": "def fresh(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE0/passing.py": {"text": "\n\ndef passing(x):\n    if x: x -= 1\n    return x\n"},
+      "$TREE0/renamed.py": {"text": "def moved(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE0/steady.py": {"text": "\n\ndef steady(x):\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE0/worse.py": {"text": "\n\ndef worse(x):\n    if x: x -= 1\n    if x: x -= 1\n    if x: x -= 1\n    return x\n"},
+      "$TREE1/.lint-action-baseline.json": {
+        "text": "{\n  \"scoring_version\": 1,\n  \"entries\": [\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"ambiguous.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"ambiguous\"\n          }\n        ]\n      },\n      \"score\": 4\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"better.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"better\"\n          }\n        ]\n      },\n      \"score\": 4\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"deleted.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"deleted\"\n          }\n        ]\n      },\n      \"score\": 3\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"fixed.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"fixed\"\n          }\n        ]\n      },\n      \"score\": 3\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"old.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"moved\"\n          }\n        ]\n      },\n      \"score\": 3\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"steady.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"steady\"\n          }\n        ]\n      },\n      \"score\": 3\n    },\n    {\n      \"rule\": \"cyclomatic-complexity\",\n      \"identity\": {\n        \"path\": \"worse.py\",\n        \"language\": \"python\",\n        \"scope\": [\n          {\n            \"kind\": \"function\",\n            \"name\": \"worse\"\n          }\n        ]\n      },\n      \"score\": 3\n    }\n  ]\n}\n"
+      }
+    },
+    "args": ["compare","--root","$TREE0","--base-root","$TREE1","--base-revision","base","--candidate-revision","candidate"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 9,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "ambiguous.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "ambiguous"}],
+          "name": "ambiguous",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "better.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "better"}],
+          "name": "better",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "baselined"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "crossed.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "crossed"}],
+          "name": "crossed",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "fresh.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "fresh"}],
+          "name": "fresh",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "renamed.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "moved"}],
+          "name": "moved",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "steady.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "steady"}],
+          "name": "steady",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "baselined"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "worse.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "worse"}],
+          "name": "worse",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 7,"column": 13}},
+          "score": 4,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [],
+      "comparison": {
+        "format_version": 1,
+        "status": "complete",
+        "base_revision": "base",
+        "candidate_revision": "candidate",
+        "base_diagnostics": [],
+        "unchanged": 1,
+        "changes": [
+          {
+            "category": "new",
+            "match_status": "matched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 2,
+              "status": null,
+              "path": "crossed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "crossed"}],
+              "name": "crossed",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 3,"column": 13}}
+            },
+            "current": {
+              "score": 3,
+              "status": "blocking",
+              "path": "crossed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "crossed"}],
+              "name": "crossed",
+              "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}}
+            }
+          },
+          {
+            "category": "new",
+            "match_status": "unmatched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": null,
+            "current": {
+              "score": 3,
+              "status": "blocking",
+              "path": "fresh.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "fresh"}],
+              "name": "fresh",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            }
+          },
+          {
+            "category": "new",
+            "match_status": "unmatched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": null,
+            "current": {
+              "score": 3,
+              "status": "blocking",
+              "path": "renamed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "moved"}],
+              "name": "moved",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            }
+          },
+          {
+            "category": "new",
+            "match_status": "ambiguous",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": null,
+            "current": {
+              "score": 3,
+              "status": "blocking",
+              "path": "ambiguous.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "ambiguous"}],
+              "name": "ambiguous",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            }
+          },
+          {
+            "category": "worsened",
+            "match_status": "matched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 3,
+              "status": "baselined",
+              "path": "worse.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "worse"}],
+              "name": "worse",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            },
+            "current": {
+              "score": 4,
+              "status": "blocking",
+              "path": "worse.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "worse"}],
+              "name": "worse",
+              "range": {"start": {"line": 3,"column": 1},"end": {"line": 7,"column": 13}}
+            }
+          },
+          {
+            "category": "improved",
+            "match_status": "matched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 4,
+              "status": "baselined",
+              "path": "better.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "better"}],
+              "name": "better",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 5,"column": 13}}
+            },
+            "current": {
+              "score": 3,
+              "status": "baselined",
+              "path": "better.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "better"}],
+              "name": "better",
+              "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}}
+            }
+          },
+          {
+            "category": "fixed",
+            "match_status": "matched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 3,
+              "status": "baselined",
+              "path": "fixed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "fixed"}],
+              "name": "fixed",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            },
+            "current": {
+              "score": 2,
+              "status": null,
+              "path": "fixed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "fixed"}],
+              "name": "fixed",
+              "range": {"start": {"line": 3,"column": 1},"end": {"line": 5,"column": 13}}
+            }
+          },
+          {
+            "category": "removed",
+            "match_status": "unmatched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 3,
+              "status": "baselined",
+              "path": "deleted.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "deleted"}],
+              "name": "deleted",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            },
+            "current": null
+          },
+          {
+            "category": "removed",
+            "match_status": "unmatched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 3,
+              "status": "baselined",
+              "path": "old.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "moved"}],
+              "name": "moved",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            },
+            "current": null
+          },
+          {
+            "category": "removed",
+            "match_status": "ambiguous",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 4,
+              "status": "baselined",
+              "path": "ambiguous.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "ambiguous"}],
+              "name": "ambiguous",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 5,"column": 13}}
+            },
+            "current": null
+          }
+        ]
+      }
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["scan","--root","$TREE0","--config","$TREE1/.lint-action.json"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 9,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "ambiguous.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "ambiguous"}],
+          "name": "ambiguous",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "better.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "better"}],
+          "name": "better",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "baselined"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "crossed.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "crossed"}],
+          "name": "crossed",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "fresh.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "fresh"}],
+          "name": "fresh",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "renamed.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "moved"}],
+          "name": "moved",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "steady.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "steady"}],
+          "name": "steady",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "baselined"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "worse.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "worse"}],
+          "name": "worse",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 7,"column": 13}},
+          "score": 4,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["compare","--root","$TREE0","--base-root","$TREE1","--base-revision","base","--candidate-revision","candidate"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 9,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "ambiguous.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "ambiguous"}],
+          "name": "ambiguous",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "better.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "better"}],
+          "name": "better",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "baselined"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "crossed.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "crossed"}],
+          "name": "crossed",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "fresh.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "fresh"}],
+          "name": "fresh",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "renamed.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "moved"}],
+          "name": "moved",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "steady.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "steady"}],
+          "name": "steady",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}},
+          "score": 3,
+          "limit": 2,
+          "severity": "error",
+          "status": "baselined"
+        },
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "worse.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "worse"}],
+          "name": "worse",
+          "range": {"start": {"line": 3,"column": 1},"end": {"line": 7,"column": 13}},
+          "score": 4,
+          "limit": 2,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [],
+      "comparison": {
+        "format_version": 1,
+        "status": "complete",
+        "base_revision": "base",
+        "candidate_revision": "candidate",
+        "base_diagnostics": [],
+        "unchanged": 1,
+        "changes": [
+          {
+            "category": "new",
+            "match_status": "matched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 2,
+              "status": null,
+              "path": "crossed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "crossed"}],
+              "name": "crossed",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 3,"column": 13}}
+            },
+            "current": {
+              "score": 3,
+              "status": "blocking",
+              "path": "crossed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "crossed"}],
+              "name": "crossed",
+              "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}}
+            }
+          },
+          {
+            "category": "new",
+            "match_status": "unmatched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": null,
+            "current": {
+              "score": 3,
+              "status": "blocking",
+              "path": "fresh.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "fresh"}],
+              "name": "fresh",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            }
+          },
+          {
+            "category": "new",
+            "match_status": "unmatched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": null,
+            "current": {
+              "score": 3,
+              "status": "blocking",
+              "path": "renamed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "moved"}],
+              "name": "moved",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            }
+          },
+          {
+            "category": "new",
+            "match_status": "ambiguous",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": null,
+            "current": {
+              "score": 3,
+              "status": "blocking",
+              "path": "ambiguous.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "ambiguous"}],
+              "name": "ambiguous",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            }
+          },
+          {
+            "category": "worsened",
+            "match_status": "matched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 3,
+              "status": "baselined",
+              "path": "worse.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "worse"}],
+              "name": "worse",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            },
+            "current": {
+              "score": 4,
+              "status": "blocking",
+              "path": "worse.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "worse"}],
+              "name": "worse",
+              "range": {"start": {"line": 3,"column": 1},"end": {"line": 7,"column": 13}}
+            }
+          },
+          {
+            "category": "improved",
+            "match_status": "matched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 4,
+              "status": "baselined",
+              "path": "better.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "better"}],
+              "name": "better",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 5,"column": 13}}
+            },
+            "current": {
+              "score": 3,
+              "status": "baselined",
+              "path": "better.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "better"}],
+              "name": "better",
+              "range": {"start": {"line": 3,"column": 1},"end": {"line": 6,"column": 13}}
+            }
+          },
+          {
+            "category": "fixed",
+            "match_status": "matched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 3,
+              "status": "baselined",
+              "path": "fixed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "fixed"}],
+              "name": "fixed",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            },
+            "current": {
+              "score": 2,
+              "status": null,
+              "path": "fixed.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "fixed"}],
+              "name": "fixed",
+              "range": {"start": {"line": 3,"column": 1},"end": {"line": 5,"column": 13}}
+            }
+          },
+          {
+            "category": "removed",
+            "match_status": "unmatched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 3,
+              "status": "baselined",
+              "path": "deleted.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "deleted"}],
+              "name": "deleted",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            },
+            "current": null
+          },
+          {
+            "category": "removed",
+            "match_status": "unmatched",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 3,
+              "status": "baselined",
+              "path": "old.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "moved"}],
+              "name": "moved",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 4,"column": 13}}
+            },
+            "current": null
+          },
+          {
+            "category": "removed",
+            "match_status": "ambiguous",
+            "rule": "cyclomatic-complexity",
+            "limit": 2,
+            "previous": {
+              "score": 4,
+              "status": "baselined",
+              "path": "ambiguous.py",
+              "language": "python",
+              "scope": [{"kind": "function","name": "ambiguous"}],
+              "name": "ambiguous",
+              "range": {"start": {"line": 1,"column": 1},"end": {"line": 5,"column": 13}}
+            },
+            "current": null
+          }
+        ]
+      }
+    },
+    "stderr": null
+  }
+]

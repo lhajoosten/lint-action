@@ -1,0 +1,239 @@
+[
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_config","path": "$TREE0/.lint-action.json","message": "limits must enable at least one language and be positive"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"typescript\": 0}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_config","path": "$TREE0/.lint-action.json","message": "limits must enable at least one language and be positive"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"javascript\": 20}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [
+        {
+          "kind": "invalid_config",
+          "path": "$TREE0/.lint-action.json",
+          "message": "unknown variant `javascript`, expected one of `rust`, `typescript`, `tsx`, `python` at line 1 column 47"
+        }
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"rust\": 1, \"typescript\": 1, \"tsx\": 1, \"python\": 1}, \"include\": [\"../**\"]}"}
+    },
+    "args": ["validate","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_config","path": "$TREE0/.lint-action.json","message": "expected a root-relative slash-separated glob, got \"../**\""}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"rust\": 1, \"typescript\": 1, \"tsx\": 1, \"python\": 1}, \"include\": [\"[\"]}"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_config","path": "$TREE0/.lint-action.json","message": "error parsing glob '[': unclosed character class; missing ']'"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"report-only\", \"limits\": {\"rust\": 1, \"typescript\": 1, \"tsx\": 1, \"python\": 1}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 0,
+      "files_skipped": 1,
+      "findings": [],
+      "diagnostics": [{"kind": "empty_scan","message": "no regular files matched the enabled languages and path selection"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["scan","--root","$TREE0","../escape.ts"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "invalid_path","path": "../escape.ts","message": "selection must stay inside the scan root"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["scan","--root","$TREE0","absent.ts"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [{"kind": "unreadable_source","path": "absent.ts","message": "No such file or directory (os error 2)"}]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/broken.ts": {"text": "function f() { return 0;"},
+      "$TREE0/encoding.ts": {"bytes": [255]},
+      "$TREE0/good.ts": {"text": "function f(x: boolean) { return x ? 1 : 0; }"},
+      "$TREE0/large.ts": {"zero_bytes": 4194305},
+      "$TREE0/syntax.py": {"text": "def :\n\tclass"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "report-only",
+      "files_scanned": 3,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "good.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 1,"column": 45}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": [
+        {"kind": "parse_error","path": "broken.ts","range": {"start": {"line": 1,"column": 25},"end": {"line": 1,"column": 25}},"message": "Tree-sitter expected }"},
+        {"kind": "invalid_encoding","path": "encoding.ts","message": "invalid utf-8 sequence of 1 bytes from index 0"},
+        {"kind": "source_too_large","path": "large.ts","message": "source exceeds 4194304 bytes"},
+        {
+          "kind": "parse_error",
+          "path": "syntax.py",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 2,"column": 7}},
+          "message": "Tree-sitter could not parse this syntax"
+        }
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {\"rust\": 1, \"typescript\": 1, \"tsx\": 1, \"python\": 1}}"}},
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 3,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "good.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 1,"column": 45}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [
+        {"kind": "parse_error","path": "broken.ts","range": {"start": {"line": 1,"column": 25},"end": {"line": 1,"column": 25}},"message": "Tree-sitter expected }"},
+        {"kind": "invalid_encoding","path": "encoding.ts","message": "invalid utf-8 sequence of 1 bytes from index 0"},
+        {"kind": "source_too_large","path": "large.ts","message": "source exceeds 4194304 bytes"},
+        {
+          "kind": "parse_error",
+          "path": "syntax.py",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 2,"column": 7}},
+          "message": "Tree-sitter could not parse this syntax"
+        }
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["baseline","--root","$TREE0"],
+    "status": 2,
+    "stdout": null,
+    "stderr": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 3,
+      "files_skipped": 1,
+      "findings": [],
+      "diagnostics": [
+        {"kind": "parse_error","path": "broken.ts","range": {"start": {"line": 1,"column": 25},"end": {"line": 1,"column": 25}},"message": "Tree-sitter expected }"},
+        {"kind": "invalid_encoding","path": "encoding.ts","message": "invalid utf-8 sequence of 1 bytes from index 0"},
+        {"kind": "source_too_large","path": "large.ts","message": "source exceeds 4194304 bytes"},
+        {
+          "kind": "parse_error",
+          "path": "syntax.py",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 2,"column": 7}},
+          "message": "Tree-sitter could not parse this syntax"
+        }
+      ]
+    }
+  }
+]

@@ -164,7 +164,5 @@ Language mappings live in `src/grammar.rs`. An adapter maps a grammar to callabl
 ```sh
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
-cargo build --locked --release
-LINT_GATE_BIN=target/release/lint-gate python3 tests/cli.py
-LINT_GATE_BIN=target/release/lint-gate python3 tests/action_test.py
+cargo test --locked --release
 ```

@@ -1,0 +1,72 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 10}}"},
+      "$TREE0/a.ts": {"text": "function first() { prepare(item); send(item); cleanup(item); }"},
+      "$TREE0/b.ts": {"text": "function second() { prepare(item); send(item); cleanup(item); }"}
+    },
+    "args": ["baseline","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "scoring_version": 1,
+      "entries": [],
+      "duplication_entries": [
+        {
+          "occurrences": [
+            {"path": "a.ts","language": "typescript","scope": [{"kind": "function","name": "first"}]},
+            {"path": "b.ts","language": "typescript","scope": [{"kind": "function","name": "second"}]}
+          ],
+          "score": 15,
+          "tokens": [
+            "identifier\u0000prepare",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;",
+            "identifier\u0000send",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;",
+            "identifier\u0000cleanup",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;"
+          ]
+        }
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\n  \"scoring_version\": 1,\n  \"entries\": [],\n  \"duplication_entries\": [\n    {\n      \"occurrences\": [\n        {\n          \"path\": \"a.ts\",\n          \"language\": \"typescript\",\n          \"scope\": [\n            {\n              \"kind\": \"function\",\n              \"name\": \"first\"\n            }\n          ]\n        },\n        {\n          \"path\": \"b.ts\",\n          \"language\": \"typescript\",\n          \"scope\": [\n            {\n              \"kind\": \"function\",\n              \"name\": \"second\"\n            }\n          ]\n        }\n      ],\n      \"score\": 15,\n      \"tokens\": [\n        \"identifier\\u0000prepare\",\n        \"(\\u0000(\",\n        \"identifier\\u0000item\",\n        \")\\u0000)\",\n        \";\\u0000;\",\n        \"identifier\\u0000send\",\n        \"(\\u0000(\",\n        \"identifier\\u0000item\",\n        \")\\u0000)\",\n        \";\\u0000;\",\n        \"identifier\\u0000cleanup\",\n        \"(\\u0000(\",\n        \"identifier\\u0000item\",\n        \")\\u0000)\",\n        \";\\u0000;\"\n      ]\n    }\n  ]\n}\n"
+      },
+      "$TREE0/b.ts": {"text": "function second() { send(item); cleanup(item); }"}
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [
+      {"op": "replace","path": "/duplication_entries/0/score","value": 10},
+      {
+        "op": "replace",
+        "path": "/duplication_entries/0/tokens",
+        "value": [
+          "identifier\u0000send",
+          "(\u0000(",
+          "identifier\u0000item",
+          ")\u0000)",
+          ";\u0000;",
+          "identifier\u0000cleanup",
+          "(\u0000(",
+          "identifier\u0000item",
+          ")\u0000)",
+          ";\u0000;"
+        ]
+      }
+    ],
+    "stderr": null
+  }
+]

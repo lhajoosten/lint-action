@@ -1,0 +1,78 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {
+        "text": "{\"mode\": \"strict\", \"limits\": {\"typescript\": 1}, \"duplication\": {}, \"severities\": {\"cyclomatic-complexity\": \"warn\", \"source-duplication\": \"pass\"}}"
+      },
+      "$TREE0/complex.ts": {"text": "function choose() { return b ? a : c; }"},
+      "$TREE0/copies.ts": {"prefix": "function repeat() {","repeat": "ping();","count": 30000,"suffix": "}"}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "complex.ts",
+          "language": "typescript",
+          "scope": [{"kind": "function","name": "choose"}],
+          "name": "choose",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 1,"column": 40}},
+          "score": 2,
+          "limit": 1,
+          "severity": "warn",
+          "status": "reported"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {\"typescript\": 1}, \"severities\": {\"cyclomatic-complexity\": \"invalid\"}}"}},
+    "args": ["validate","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [
+        {
+          "kind": "invalid_config",
+          "path": "$TREE0/.lint-action.json",
+          "message": "unknown variant `invalid`, expected one of `pass`, `warn`, `error` at line 1 column 97"
+        }
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {\"typescript\": 1}, \"severities\": {\"unknown-rule\": \"warn\"}}"}},
+    "args": ["validate","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": null,
+      "files_scanned": 0,
+      "files_skipped": 0,
+      "findings": [],
+      "diagnostics": [
+        {
+          "kind": "invalid_config",
+          "path": "$TREE0/.lint-action.json",
+          "message": "unknown variant `unknown-rule`, expected one of `cyclomatic-complexity`, `cognitive-complexity`, `source-duplication` at line 1 column 77"
+        }
+      ]
+    },
+    "stderr": null
+  }
+]

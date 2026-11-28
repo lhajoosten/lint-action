@@ -1,0 +1,29 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 10}, \"severities\": {\"source-duplication\": \"warn\"}}"},
+      "$TREE0/a.ts": {"prefix": "function repeat() {","repeat": "ping();","count": 210000,"suffix": "}"},
+      "$TREE0/b.ts": {"text": "function ("}
+    },
+    "args": ["scan","--root","$TREE0"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 2,
+      "files_skipped": 1,
+      "findings": [],
+      "diagnostics": [
+        {"kind": "duplication_limit","message": "source duplication exceeded its analysis budget; narrow the source selection or increase minimum_tokens"},
+        {
+          "kind": "parse_error",
+          "path": "b.ts",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 1,"column": 11}},
+          "message": "Tree-sitter could not parse this syntax"
+        }
+      ]
+    },
+    "stderr": null
+  }
+]

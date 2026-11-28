@@ -1,0 +1,139 @@
+[
+  {
+    "files": {"$TREE0/.lint-action.json": {"text": "{\"mode\": \"strict\", \"limits\": {\"python\": 1}}"},"$TREE0/candidate.py": {"text": "def f(x): return 1 if x else 0"}},
+    "args": ["compare","--root","$TREE0","--config","$TREE0/.lint-action.json"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "candidate.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 1,"column": 31}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [],
+      "comparison": {
+        "format_version": 1,
+        "status": "unavailable",
+        "base_revision": null,
+        "candidate_revision": null,
+        "reason": "base_root_unavailable",
+        "base_diagnostics": [],
+        "changes": []
+      }
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE1/broken.py": {"text": "def broken(:\n"}},
+    "args": ["compare","--root","$TREE0","--config","$TREE0/.lint-action.json","--base-root","$TREE1/missing"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "candidate.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 1,"column": 31}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [],
+      "comparison": {
+        "format_version": 1,
+        "status": "unavailable",
+        "base_revision": null,
+        "candidate_revision": null,
+        "reason": "base_analysis_failed",
+        "base_diagnostics": [{"kind": "invalid_path","path": "$TREE1/missing","message": "scan root must be an accessible directory"}],
+        "changes": []
+      }
+    },
+    "stderr": null
+  },
+  {
+    "files": {},
+    "args": ["compare","--root","$TREE0","--config","$TREE0/.lint-action.json","--base-root","$TREE1"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [
+        {
+          "rule": "cyclomatic-complexity",
+          "path": "candidate.py",
+          "language": "python",
+          "scope": [{"kind": "function","name": "f"}],
+          "name": "f",
+          "range": {"start": {"line": 1,"column": 1},"end": {"line": 1,"column": 31}},
+          "score": 2,
+          "limit": 1,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": [],
+      "comparison": {
+        "format_version": 1,
+        "status": "unavailable",
+        "base_revision": null,
+        "candidate_revision": null,
+        "reason": "base_analysis_failed",
+        "base_diagnostics": [{"kind": "parse_error","path": "broken.py","range": {"start": {"line": 1,"column": 12},"end": {"line": 1,"column": 12}},"message": "Tree-sitter expected )"}],
+        "changes": []
+      }
+    },
+    "stderr": null
+  },
+  {
+    "files": {"$TREE0/candidate.py": {"text": "def broken(:\n"},"$TREE1/broken.py": {"text": "def passing(): pass"}},
+    "args": ["compare","--root","$TREE0","--config","$TREE0/.lint-action.json","--base-root","$TREE1"],
+    "status": 2,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "strict",
+      "files_scanned": 1,
+      "files_skipped": 1,
+      "findings": [],
+      "diagnostics": [
+        {"kind": "parse_error","path": "candidate.py","range": {"start": {"line": 1,"column": 12},"end": {"line": 1,"column": 12}},"message": "Tree-sitter expected )"}
+      ],
+      "comparison": {
+        "format_version": 1,
+        "status": "unavailable",
+        "base_revision": null,
+        "candidate_revision": null,
+        "reason": "candidate_analysis_failed",
+        "base_diagnostics": [],
+        "changes": []
+      }
+    },
+    "stderr": null
+  }
+]

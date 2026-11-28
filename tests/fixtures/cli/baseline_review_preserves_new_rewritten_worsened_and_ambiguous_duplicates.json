@@ -1,0 +1,112 @@
+[
+  {
+    "files": {
+      "$TREE0/.lint-action.json": {"text": "{\"mode\": \"baseline\", \"limits\": {}, \"duplication\": {\"minimum_tokens\": 10}}"},
+      "$TREE0/a.ts": {"text": "function first() { prepare(item); send(item); cleanup(item); }"},
+      "$TREE0/b.ts": {"text": "function second() { prepare(item); send(item); cleanup(item); }"}
+    },
+    "args": ["baseline","--root","$TREE0"],
+    "status": 0,
+    "stdout": {
+      "scoring_version": 1,
+      "entries": [],
+      "duplication_entries": [
+        {
+          "occurrences": [
+            {"path": "a.ts","language": "typescript","scope": [{"kind": "function","name": "first"}]},
+            {"path": "b.ts","language": "typescript","scope": [{"kind": "function","name": "second"}]}
+          ],
+          "score": 15,
+          "tokens": [
+            "identifier\u0000prepare",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;",
+            "identifier\u0000send",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;",
+            "identifier\u0000cleanup",
+            "(\u0000(",
+            "identifier\u0000item",
+            ")\u0000)",
+            ";\u0000;"
+          ]
+        }
+      ]
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/.lint-action-baseline.json": {
+        "text": "{\"scoring_version\": 1, \"entries\": [], \"duplication_entries\": [{\"occurrences\": [{\"path\": \"a.ts\", \"language\": \"typescript\", \"scope\": [{\"kind\": \"function\", \"name\": \"first\"}]}, {\"path\": \"b.ts\", \"language\": \"typescript\", \"scope\": [{\"kind\": \"function\", \"name\": \"second\"}]}], \"score\": 15, \"tokens\": [\"identifier\\u0000prepare\", \"(\\u0000(\", \"identifier\\u0000item\", \")\\u0000)\", \";\\u0000;\", \"identifier\\u0000send\", \"(\\u0000(\", \"identifier\\u0000item\", \")\\u0000)\", \";\\u0000;\", \"identifier\\u0000cleanup\", \"(\\u0000(\", \"identifier\\u0000item\", \")\\u0000)\", \";\\u0000;\"]}]}"
+      },
+      "$TREE0/c.ts": {"text": "function third() { prepare(item); send(item); cleanup(item); }"}
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [],
+    "stderr": "baseline-review: preserved unchanged, worsened, or rewritten duplication match for a.ts and b.ts (score 15)\n"
+  },
+  {
+    "files": {
+      "$TREE0/c.ts": null,
+      "$TREE0/a.ts": {"text": "function first() { prepare(other); send(other); cleanup(other); }"},
+      "$TREE0/b.ts": {"text": "function second() { prepare(other); send(other); cleanup(other); }"}
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [],
+    "stderr": "baseline-review: preserved unchanged, worsened, or rewritten duplication match for a.ts and b.ts (score 15)\n"
+  },
+  {
+    "files": {
+      "$TREE0/a.ts": {"text": "function first() { prepare(item); send(item); cleanup(item); finish(item); }"},
+      "$TREE0/b.ts": {"text": "function second() { prepare(item); send(item); cleanup(item); finish(item); }"}
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [],
+    "stderr": "baseline-review: preserved unchanged, worsened, or rewritten duplication match for a.ts and b.ts (score 20)\n"
+  },
+  {
+    "files": {},
+    "args": ["scan","--root","$TREE0"],
+    "status": 1,
+    "stdout": {
+      "format_version": 2,
+      "scoring_version": 1,
+      "mode": "baseline",
+      "files_scanned": 2,
+      "files_skipped": 2,
+      "findings": [
+        {
+          "rule": "source-duplication",
+          "score": 20,
+          "occurrences": [
+            {"path": "a.ts","range": {"start": {"line": 1,"column": 20},"end": {"line": 1,"column": 75}}},
+            {"path": "b.ts","range": {"start": {"line": 1,"column": 21},"end": {"line": 1,"column": 76}}}
+          ],
+          "limit": 10,
+          "severity": "error",
+          "status": "blocking"
+        }
+      ],
+      "diagnostics": []
+    },
+    "stderr": null
+  },
+  {
+    "files": {
+      "$TREE0/a.ts": {"text": "function first() { prepare(item); send(item); cleanup(item); prepare(item); send(item); cleanup(item); }"},
+      "$TREE0/b.ts": {"text": "function second() { prepare(item); send(item); cleanup(item); prepare(item); send(item); cleanup(item); }"}
+    },
+    "args": ["baseline-review","--root","$TREE0"],
+    "status": 0,
+    "stdout": [],
+    "stderr": "baseline-review: deferred ambiguous or overlapping duplication match for a.ts and b.ts\n"
+  }
+]
