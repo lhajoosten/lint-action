@@ -386,7 +386,7 @@ fn scan_text_and_json_formats_follow_the_gate() {
         assert_eq!(default.stdout, json.stdout);
         let _: Value = serde_json::from_slice(&json.stdout).unwrap();
         assert!(text.stderr.is_empty());
-        assert!(!text.stdout.iter().any(|&byte| byte == 0x1b));
+        assert!(!text.stdout.contains(&0x1b));
         String::from_utf8(text.stdout).unwrap()
     };
 
