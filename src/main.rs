@@ -7,6 +7,7 @@ mod github;
 mod grammar;
 mod model;
 mod policy;
+mod preview;
 mod scan;
 mod text;
 
@@ -59,6 +60,24 @@ enum Command {
         /// Optional candidate revision label for the materialized tree.
         #[arg(long)]
         candidate_revision: Option<String>,
+    },
+    /// Compare trusted and proposed policy effects on the same candidate source.
+    PolicyPreview {
+        /// Candidate source root.
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// Trusted policy file.
+        #[arg(long)]
+        base_config: PathBuf,
+        /// Trusted baseline file.
+        #[arg(long)]
+        base_baseline: PathBuf,
+        /// Proposed policy file.
+        #[arg(long)]
+        proposed_config: PathBuf,
+        /// Proposed baseline file.
+        #[arg(long)]
+        proposed_baseline: PathBuf,
     },
     /// Write a baseline to stdout using the configured limits and selection.
     Baseline {
@@ -280,7 +299,7 @@ fn scan(
     if validate_only {
         return Ok(());
     }
-    let mut scanned = scan::scan(&settings.input.root, paths, &policy);
+    let mut scanned = scan::scan(&settings.input.root, paths, &policy, false);
     let scored = ScoredTree::new(&mut scanned, &policy, report);
     scored.add_findings(&policy, &baseline, report);
     Ok(())
@@ -422,13 +441,13 @@ fn compare(
     report.set_policy(&policy);
     comparison.set_policy(&policy);
     let baseline = settings.baseline(policy.mode)?;
-    let mut scanned = scan::scan(&settings.input.root, &[], &policy);
+    let mut scanned = scan::scan(&settings.input.root, &[], &policy, false);
     let candidate = ScoredTree::new(&mut scanned, &policy, report);
     if !report.diagnostics.is_empty() {
         comparison.unavailable("candidate_analysis_failed");
     } else if let Some(root) = base_root {
         let mut base_report = Report::new();
-        let mut scanned = scan::scan(root, &[], &policy);
+        let mut scanned = scan::scan(root, &[], &policy, false);
         let base = ScoredTree::new(&mut scanned, &policy, &mut base_report);
         if base_report.diagnostics.is_empty() {
             comparison.compare(&base, &candidate, &policy, &baseline);
@@ -450,7 +469,7 @@ fn generate(
 ) -> Result<Option<Vec<u8>>, Diagnostic> {
     let policy = input.policy()?;
     report.set_policy(&policy);
-    let scan = scan::scan(&input.root, paths, &policy);
+    let scan = scan::scan(&input.root, paths, &policy, false);
     report.files_scanned = scan.files_scanned;
     report.files_skipped = scan.files_skipped;
     let Analysis {
@@ -514,7 +533,7 @@ fn review_baseline(
     report.set_policy(&policy);
     let baseline_path = settings.baseline_path();
     let baseline = Baseline::read(&baseline_path)?;
-    let scanned = scan::scan(&settings.input.root, &[], &policy);
+    let scanned = scan::scan(&settings.input.root, &[], &policy, false);
     report.files_scanned = scanned.files_scanned;
     report.files_skipped = scanned.files_skipped;
     let Analysis {
@@ -808,6 +827,21 @@ fn run(command: Command) -> io::Result<u8> {
                 report.diagnostics.push(diagnostic);
             }
             report.comparison = Some(comparison);
+        }
+        Command::PolicyPreview {
+            root,
+            base_config,
+            base_baseline,
+            proposed_config,
+            proposed_baseline,
+        } => {
+            return preview::run(
+                &root,
+                &base_config,
+                &base_baseline,
+                &proposed_config,
+                &proposed_baseline,
+            );
         }
         Command::Validate { settings } => {
             if let Err(diagnostic) = scan(&settings, &[], &mut report, true) {

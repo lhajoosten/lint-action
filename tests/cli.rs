@@ -456,3 +456,209 @@ fn scan_text_and_json_formats_follow_the_gate() {
     assert!(text.contains("invalid_config"), "{text}");
     assert!(text.contains("incomplete:"), "{text}");
 }
+
+#[test]
+fn policy_preview_is_advisory_and_trusted_comparison_still_blocks() {
+    let base = tempfile::tempdir().unwrap();
+    let candidate = tempfile::tempdir().unwrap();
+    let tools = common::without_python();
+    let root = candidate.path();
+    let file = "def f(x):\n    if x: return 1\n    return 0\n";
+    fs::write(root.join("debt.py"), file).unwrap();
+    fs::write(base.path().join("clean.py"), "def ok():\n    return 0\n").unwrap();
+    let config = r#"{"mode":"baseline","limits":{"python":1}}"#;
+    fs::write(base.path().join("policy.json"), config).unwrap();
+    fs::write(root.join("proposed.json"), config).unwrap();
+    let empty = r#"{"scoring_version":1,"entries":[]}"#;
+    fs::write(base.path().join("baseline.json"), empty).unwrap();
+    let generated = common::command(&tools)
+        .args(["baseline", "--root"])
+        .arg(root)
+        .arg("--config")
+        .arg(root.join("proposed.json"))
+        .output()
+        .unwrap();
+    assert!(generated.status.success());
+    fs::write(root.join("proposed-baseline.json"), &generated.stdout).unwrap();
+    let invoke = || {
+        common::command(&tools)
+            .args(["policy-preview", "--root"])
+            .arg(root)
+            .arg("--base-config")
+            .arg(base.path().join("policy.json"))
+            .arg("--base-baseline")
+            .arg(base.path().join("baseline.json"))
+            .arg("--proposed-config")
+            .arg(root.join("proposed.json"))
+            .arg("--proposed-baseline")
+            .arg(root.join("proposed-baseline.json"))
+            .output()
+            .unwrap()
+    };
+    let output = invoke();
+    assert_eq!(output.status.code(), Some(0));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["complete"], true);
+    assert!(
+        value["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["disposition"] == "waiver_gained"
+                && c["base"]["status"] == "blocking"
+                && c["proposed"]["status"] == "baselined")
+    );
+    assert_eq!(
+        fs::read(root.join("proposed-baseline.json")).unwrap(),
+        generated.stdout
+    );
+    let comparison = common::command(&tools)
+        .args(["compare", "--root"])
+        .arg(root)
+        .arg("--base-root")
+        .arg(base.path())
+        .arg("--config")
+        .arg(base.path().join("policy.json"))
+        .arg("--baseline")
+        .arg(base.path().join("baseline.json"))
+        .output()
+        .unwrap();
+    assert_eq!(comparison.status.code(), Some(1));
+    fs::write(root.join("proposed-baseline.json"), "invalid").unwrap();
+    let output = invoke();
+    assert_eq!(output.status.code(), Some(2));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["complete"], false);
+    assert_eq!(
+        value["proposed"]["report"]["diagnostics"][0]["kind"],
+        "invalid_baseline"
+    );
+    assert!(value.get("changes").is_none());
+}
+
+#[test]
+fn policy_preview_reports_dropped_coverage_and_empty_selection() {
+    let tree = tempfile::tempdir().unwrap();
+    let tools = common::without_python();
+    let root = tree.path();
+    fs::create_dir(root.join("old")).unwrap();
+    fs::write(root.join("old/a.py"), "def f(x):\n    if x: return 1\n").unwrap();
+    fs::write(root.join("old/clean.py"), "def f():\n    return 1\n").unwrap();
+    fs::write(root.join("keep.py"), "def g():\n    return 1\n").unwrap();
+    fs::write(
+        root.join("base.json"),
+        r#"{"mode":"strict","limits":{"python":1}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("new.json"),
+        r#"{"mode":"strict","limits":{"python":1},"exclude":["old"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("baseline.json"),
+        r#"{"scoring_version":1,"entries":[]}"#,
+    )
+    .unwrap();
+    let invoke = || {
+        common::command(&tools)
+            .args(["policy-preview", "--root"])
+            .arg(root)
+            .arg("--base-config")
+            .arg(root.join("base.json"))
+            .arg("--base-baseline")
+            .arg(root.join("baseline.json"))
+            .arg("--proposed-config")
+            .arg(root.join("new.json"))
+            .arg("--proposed-baseline")
+            .arg(root.join("baseline.json"))
+            .output()
+            .unwrap()
+    };
+    let output = invoke();
+    assert_eq!(output.status.code(), Some(0));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        value["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["disposition"] == "coverage_dropped")
+    );
+    assert!(
+        value["coverage_changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["path"] == "old/clean.py"
+                && c["rule"] == "cyclomatic-complexity"
+                && c["proposed"] == false)
+    );
+    fs::write(
+        root.join("new.json"),
+        r#"{"mode":"strict","limits":{"python":1},"include":["missing/**"]}"#,
+    )
+    .unwrap();
+    let output = invoke();
+    assert_eq!(output.status.code(), Some(2));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        value["proposed"]["report"]["diagnostics"][0]["kind"],
+        "empty_scan"
+    );
+    assert!(value.get("coverage_changes").is_none());
+}
+
+#[test]
+fn policy_preview_reports_thresholds_severities_and_all_rule_types() {
+    let tree = tempfile::tempdir().unwrap();
+    let tools = common::without_python();
+    let root = tree.path();
+    let source = "function f(x: number) { try { if (x) { if (x > 1) { return x + 1; } } return x + 2; } finally { return 3; } }\n";
+    fs::write(root.join("a.ts"), source).unwrap();
+    fs::write(root.join("b.ts"), source.replace("f(", "g(")).unwrap();
+    fs::write(root.join("base.json"), r#"{"mode":"strict","limits":{"typescript":5},"cognitive_limits":{"typescript":5},"duplication":{"minimum_tokens":10},"finally_exit":true}"#).unwrap();
+    fs::write(root.join("new.json"), r#"{"mode":"strict","limits":{"typescript":1},"cognitive_limits":{"typescript":1},"duplication":{"minimum_tokens":10},"finally_exit":true,"severities":{"finally-exit":"warn","source-duplication":"warn"}}"#).unwrap();
+    fs::write(
+        root.join("baseline.json"),
+        r#"{"scoring_version":1,"entries":[]}"#,
+    )
+    .unwrap();
+    let output = common::command(&tools)
+        .args(["policy-preview", "--root"])
+        .arg(root)
+        .arg("--base-config")
+        .arg(root.join("base.json"))
+        .arg("--base-baseline")
+        .arg(root.join("baseline.json"))
+        .arg("--proposed-config")
+        .arg(root.join("new.json"))
+        .arg("--proposed-baseline")
+        .arg(root.join("baseline.json"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let changes = value["changes"].as_array().unwrap();
+    for rule in ["cyclomatic-complexity", "cognitive-complexity"] {
+        assert!(
+            changes.iter().any(|c| c["proposed"]["rule"] == rule
+                && c["base_limit"] == 5
+                && c["proposed_limit"] == 1
+                && c["base_outcome"] == "not_reported"
+                && c["proposed_outcome"] == "blocking"),
+            "{rule}: {value}"
+        );
+    }
+    for rule in ["source-duplication", "finally-exit"] {
+        assert!(
+            changes.iter().any(|c| c["proposed"]["rule"] == rule
+                && c["disposition"] == "error_to_warn"
+                && c["base_outcome"] == "blocking"
+                && c["proposed_outcome"] == "reported"),
+            "{rule}: {value}"
+        );
+    }
+    assert_eq!(value["base_gate"], "blocking");
+    assert_eq!(value["proposed_gate"], "blocking");
+}

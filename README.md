@@ -142,6 +142,24 @@ Comparison uses the policy and baseline from the base directory for both scans. 
 
 The Actions summary shows new and worsened findings before improvements, fixes, and removals. It counts unchanged findings and displays both locations of each duplicate. The full candidate report remains available through the Action's `report` output. The composite Action labels a clean candidate checkout with its HEAD SHA. A checkout with local changes still uses the working tree for the gate.
 
+### Preview policy changes
+
+Use `policy-preview` to evaluate the same candidate tree with an explicitly trusted policy and baseline and a proposed pair. For example, after preparing proposed files in the candidate tree:
+
+```sh
+lint-gate policy-preview --root ./candidate \
+  --base-config ./trusted/.lint-action.json \
+  --base-baseline ./trusted/.lint-action-baseline.json \
+  --proposed-config ./candidate/.lint-action.json \
+  --proposed-baseline ./candidate/.lint-action-baseline.json
+```
+
+For example, a callable with score 3 and a trusted limit of 3 passes; lowering the proposed limit to 2 reports it as newly blocking, with `base_limit: 3`, `proposed_limit: 2`, `base_outcome: "not_reported"`, and `proposed_outcome: "blocking"`.
+
+The JSON output includes each side's gate outcome and findings, paired changes with both limits and outcomes, and per-rule coverage changes for analyzed files. For example, `waiver_gained` identifies a blocking finding covered by the proposed baseline; `error_to_warn` highlights a severity downgrade. `coverage_dropped` means the proposed policy no longer selects the finding's path or rule; `no_longer_reported` can instead reflect a changed threshold and does not mean source was fixed. Duplication is paired by both exact occurrence ranges. The command only reads files and returns 0 for a complete advisory preview, even if a side blocks. It returns 2 with side-specific diagnostics and no change claims when either evaluation is incomplete, including malformed baselines and empty source selections. Both baseline files are required even outside baseline mode.
+
+This preview does not replace the normal PR gate: run `compare` with the trusted base policy and baseline to determine whether the candidate passes.
+
 ## Report contract
 
 `scan` writes JSON with `format_version: 2`, `scoring_version`, `mode`, file counts, `findings`, and `diagnostics`. Scored findings include a stable rule ID, severity, score, limit, and disposition (`reported`, `baselined`, or `blocking`). Locations use one-based lines and UTF-8 byte columns, with an exclusive end. Findings are sorted by the first occurrence's path and start position, then by rule. Complexity findings retain the source path, language, callable name, scope, and range. Cognitive findings include the scoring contributions. Duplication findings carry two locations in `occurrences`, and `limit` is an inclusive minimum. Diagnostics have distinct types for configuration, baseline, path, source reads, encoding, file size, parser errors, empty scans, and the duplication analysis budget.

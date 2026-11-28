@@ -12,10 +12,15 @@ use walkdir::{DirEntry, WalkDir};
 pub struct Scan {
     pub files_scanned: usize,
     pub files_skipped: usize,
+    pub selected_paths: Vec<PathBuf>,
     pub analysis: Analysis,
 }
 
-pub fn scan(root: &Path, paths: &[PathBuf], policy: &Policy) -> Scan {
+pub fn scan_with_paths(root: &Path, policy: &Policy) -> Scan {
+    scan(root, &[], policy, true)
+}
+
+pub fn scan(root: &Path, paths: &[PathBuf], policy: &Policy, capture_paths: bool) -> Scan {
     let mut scan = Scan::default();
     let root = match root.canonicalize() {
         Ok(root) if root.is_dir() => root,
@@ -65,6 +70,7 @@ pub fn scan(root: &Path, paths: &[PathBuf], policy: &Policy) -> Scan {
         match scan_file(&root, &path, policy, duplication_budget) {
             Ok(Some(result)) => {
                 scan.files_scanned += 1;
+                capture_path(&mut scan.selected_paths, &root, &path, capture_paths);
                 scan.analysis.callables.extend(result.callables);
                 scan.analysis.finally_exits.extend(result.finally_exits);
                 scan.analysis.scope_counts.extend(result.scope_counts);
@@ -97,6 +103,16 @@ pub fn scan(root: &Path, paths: &[PathBuf], policy: &Policy) -> Scan {
         ));
     }
     scan
+}
+
+fn capture_path(paths: &mut Vec<PathBuf>, root: &Path, path: &Path, capture: bool) {
+    if capture {
+        paths.push(
+            path.strip_prefix(root)
+                .expect("discovered within root")
+                .to_owned(),
+        );
+    }
 }
 
 fn explicit_path(root: &Path, path: &Path) -> Result<PathBuf, Diagnostic> {
