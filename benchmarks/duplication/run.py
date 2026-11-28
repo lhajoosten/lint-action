@@ -80,11 +80,7 @@ def show(label, samples):
 
 
 def fixture(binary, name, repeats):
-    fixture_path = (
-        HERE / name
-        if name == "cross-file.json"
-        else HERE.parents[1] / "tests" / "fixtures" / "cli" / name
-    )
+    fixture_path = HERE.parents[1] / "tests" / "fixtures" / "cli" / name
     steps = json.loads(fixture_path.read_text())
     timings = [[] for _ in steps]
     for _ in range(repeats):
@@ -164,7 +160,7 @@ def main():
         parser.error("--repeat must be positive")
     for name in (
         "source_duplication_consolidates_repeated_runs.json",
-        "cross-file.json",
+        "source_duplication_cross_file_repetition_and_third_copy.json",
         "source_duplication_baseline_is_pair_and_content_specific.json",
         "baseline_review_emits_no_patch_on_duplication_resource_error.json",
     ):
