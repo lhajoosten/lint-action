@@ -706,7 +706,7 @@ fn conversation_keeps_existing_thread_identity_and_fixes_resolve_only_app_thread
         assert!(!summary.contains("existing debt"));
         state
             .reviews
-            .push(json!({"id": 900, "body": "<!-- lint-gate-finding:dead -->",
+            .push(json!({"id": 900, "body": "<!-- lint-gate-finding:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->",
             "resolved":false,"user":{"type":"User","id":90,"login":"human"}}));
     }
     let moved = finding("flow", 3, "blocking");
@@ -747,6 +747,34 @@ fn conversation_supports_legacy_reports_and_file_anchors_and_rejects_unsafe_inpu
     let state = fixture.mock.state.lock().unwrap();
     assert_eq!(state.reviews[0]["subject_type"], "file");
     assert!(state.reviews[0].get("line").is_none());
+}
+
+#[test]
+fn incomplete_evidence_preserves_existing_app_thread_and_summary() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    fixture.deliver(&[finding("flow", 2, "blocking")], &["flow.ts"]);
+    let (reviews, issue) = {
+        let state = fixture.mock.state.lock().unwrap();
+        (state.reviews.clone(), state.issue.clone())
+    };
+    let result = fixture.publish(2, &[], false, &["flow.ts"], |_| {});
+    assert!(result.status.success());
+    assert!(String::from_utf8_lossy(&result.stdout).contains("No complete verified scan"));
+    {
+        let mut state = fixture.mock.state.lock().unwrap();
+        assert_eq!(state.reviews, reviews);
+        assert_eq!(state.issue, issue);
+        state.blocking = false;
+        state.scan_failure = true;
+    }
+    let result = fixture.publish(2, &[], true, &["flow.ts"], |_| {});
+    assert!(result.status.success());
+    assert!(String::from_utf8_lossy(&result.stdout).contains("No complete verified scan"));
+    let state = fixture.mock.state.lock().unwrap();
+    assert_eq!(state.reviews, reviews);
+    assert_eq!(state.issue, issue);
+    assert_eq!(state.thread_updates, 0);
 }
 
 #[test]
@@ -850,7 +878,7 @@ fn all_denied_obsolete_threads_are_reported_and_other_findings_continue() {
     {
         let mut state = fixture.mock.state.lock().unwrap();
         state.can_resolve = false;
-        state.reviews.push(json!({"id": 900, "body": "<!-- lint-gate-finding:dead -->", "resolved":false,"user":{"type":"User","id":90,"login":"human"}}));
+        state.reviews.push(json!({"id": 900, "body": "<!-- lint-gate-finding:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->", "resolved":false,"user":{"type":"User","id":90,"login":"human"}}));
     }
     let current = [finding("new", 3, "blocking")];
     fixture.deliver(&current, &["flow.ts"]);
