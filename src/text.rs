@@ -20,6 +20,7 @@ fn rule(rule: Rule) -> &'static str {
     match rule {
         Rule::CyclomaticComplexity => "cyclomatic-complexity",
         Rule::CognitiveComplexity => "cognitive-complexity",
+        Rule::CallableLines => "callable-lines",
         Rule::SourceDuplication => "source-duplication",
         Rule::FinallyExit => "finally-exit",
     }

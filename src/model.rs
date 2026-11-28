@@ -9,6 +9,7 @@ pub enum Rule {
     #[default]
     CyclomaticComplexity,
     CognitiveComplexity,
+    CallableLines,
     SourceDuplication,
     FinallyExit,
 }
@@ -16,7 +17,7 @@ pub enum Rule {
 impl Rule {
     pub fn supports(self, language: Language) -> bool {
         match self {
-            Self::CyclomaticComplexity => true,
+            Self::CyclomaticComplexity | Self::CallableLines => true,
             Self::FinallyExit => matches!(
                 language,
                 Language::Typescript | Language::Tsx | Language::Python

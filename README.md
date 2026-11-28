@@ -2,7 +2,7 @@
 
 <img width="2172" height="724" alt="image" src="https://github.com/user-attachments/assets/ce155939-1d71-4150-8afa-b5ba263b1e34" />
 
-A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, and cognitive complexity and opt-in source duplication in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
+A Tree-sitter CLI and composite GitHub Action for cyclomatic complexity in Rust, TypeScript, TSX, and Python, opt-in callable body line limits in those languages, and cognitive complexity and opt-in source duplication in TypeScript and TSX. The CLI and Action use the same parser, scoring contract, and policy.
 
 ## Run locally
 
@@ -29,6 +29,8 @@ Create `.lint-action.json` at the source root. This example reports findings wit
   "exclude": ["**/generated/**", "**/node_modules/**"]
 }
 ```
+
+Optionally set `"callable_line_limits": {"rust": 50, "typescript": 50, "tsx": 50, "python": 50}` to report long callable bodies; this map independently selects languages and has no default. See the [counting contract](docs/rules/callable-lines.md) before choosing limits.
 
 Both complexity rules default to a limit of **12**. Omitting `limits` enables cyclomatic complexity in all supported languages. If supplied, `limits` selects the enabled languages and gives their cyclomatic limits. Cognitive complexity runs for enabled TypeScript and TSX. Set `cognitive_limits` to override either cognitive limit independently.
 

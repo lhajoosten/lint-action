@@ -182,6 +182,7 @@ fn scan_file(
     let active_for_language = [
         Rule::CyclomaticComplexity,
         Rule::CognitiveComplexity,
+        Rule::CallableLines,
         Rule::SourceDuplication,
         Rule::FinallyExit,
     ]
@@ -225,9 +226,12 @@ fn scan_file(
         language,
         source,
         budget,
-        policy.active_for(language, Rule::CyclomaticComplexity),
-        policy.active_for(language, Rule::CognitiveComplexity),
-        policy.active_for(language, Rule::FinallyExit),
+        crate::analyzer::Enabled {
+            cyclomatic: policy.active_for(language, Rule::CyclomaticComplexity),
+            cognitive: policy.active_for(language, Rule::CognitiveComplexity),
+            lines: policy.active_for(language, Rule::CallableLines),
+            finally: policy.active_for(language, Rule::FinallyExit),
+        },
     )
     .map(Some)
 }
