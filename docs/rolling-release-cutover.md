@@ -4,7 +4,7 @@ Lint Gate uses Rolling Release to prepare a release PR, then create a stable tag
 
 ## Before enabling writes
 
-1. Check that Upkeep Bot’s pilot has passed and confirm there is no open legacy release proposal or release writer in flight. Keep proposal and publication writes disabled during cutover. The new caller requires `RELEASE_LOG_WRITE_ENABLED=true` to write.
+1. Confirm there is no open legacy release proposal or release writer in flight. Keep proposal and publication writes disabled during cutover. The new caller requires `RELEASE_LOG_WRITE_ENABLED=true` to write.
 2. Set `ROLLING_RELEASE_BOT` to `rolling-release-log[bot]` after confirming the installed release App identity. Keep `RELEASE_APP_ID` and the existing private key secret. The caller accepts either the current `RELEASE_LOG_PRIVATE_KEY` name or `RELEASE_APP_PRIVATE_KEY`. The existing stable tag is the baseline, so no first-release starting SHA is needed.
 3. Extend the release App ruleset to reserve writes to `release/next` for the release App. The existing ruleset covers `release-log/main` and `release-log-series/*/main`. Keep strict `quality` protection and preserve the ordinary PR metadata check. Rehearse `proposal-check / proposal` on the App’s protected proposal branch and confirm the displayed name before requiring it.
 4. With owner approval, update these previously merged PR titles. Keep the original PR numbers and descriptions.
