@@ -712,6 +712,40 @@ fn conversation_publishes_unscored_finally_findings_and_rejects_legacy_version()
 }
 
 #[test]
+fn conversation_publishes_empty_handler_and_rejects_malformed_evidence() {
+    let fixture = PublicationFixture::new();
+    fixture.blocking(true);
+    let mut blocker = finding("flow", 2, "blocking");
+    blocker["rule"] = json!("empty-handler");
+    blocker["range"]["end"] = json!({"line": 2, "column": 7});
+    blocker["cause"] = json!("empty catch");
+    blocker["body_shape"] = json!("empty body");
+    blocker["message"] = json!("This handler silently discards an exception.");
+    blocker.as_object_mut().unwrap().remove("score");
+    blocker.as_object_mut().unwrap().remove("limit");
+    assert!(
+        !fixture
+            .publish(2, &[blocker.clone()], true, &["flow.ts"], |_| {})
+            .status
+            .success()
+    );
+    let mut malformed = blocker.clone();
+    malformed["body_shape"] = json!("");
+    assert!(
+        !fixture
+            .publish(3, &[malformed], true, &["flow.ts"], |_| {})
+            .status
+            .success()
+    );
+    let valid = fixture.publish(3, &[blocker], true, &["flow.ts"], |_| {});
+    assert!(valid.status.success(), "{valid:?}");
+    let state = fixture.mock.state.lock().unwrap();
+    let body = state.reviews[0]["body"].as_str().unwrap();
+    assert!(body.contains("silently discards an exception"));
+    assert!(!body.contains("score"));
+}
+
+#[test]
 fn conversation_keeps_existing_thread_identity_and_fixes_resolve_only_app_threads() {
     let fixture = PublicationFixture::new();
     fixture.blocking(true);

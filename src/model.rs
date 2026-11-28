@@ -11,13 +11,14 @@ pub enum Rule {
     CognitiveComplexity,
     SourceDuplication,
     FinallyExit,
+    EmptyHandler,
 }
 
 impl Rule {
     pub fn supports(self, language: Language) -> bool {
         match self {
             Self::CyclomaticComplexity => true,
-            Self::FinallyExit => matches!(
+            Self::FinallyExit | Self::EmptyHandler => matches!(
                 language,
                 Language::Typescript | Language::Tsx | Language::Python
             ),
@@ -124,5 +125,17 @@ pub struct FinallyExit {
     pub name: String,
     pub range: Range,
     pub transfer: String,
+    pub message: &'static str,
+}
+
+#[derive(Serialize)]
+pub struct EmptyHandler {
+    pub rule: Rule,
+    #[serde(flatten)]
+    pub identity: Identity,
+    pub name: String,
+    pub range: Range,
+    pub cause: &'static str,
+    pub body_shape: &'static str,
     pub message: &'static str,
 }

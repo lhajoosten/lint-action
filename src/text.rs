@@ -22,6 +22,7 @@ fn rule(rule: Rule) -> &'static str {
         Rule::CognitiveComplexity => "cognitive-complexity",
         Rule::SourceDuplication => "source-duplication",
         Rule::FinallyExit => "finally-exit",
+        Rule::EmptyHandler => "empty-handler",
     }
 }
 
@@ -78,6 +79,13 @@ fn write_finding(mut out: impl Write, finding: &Finding) -> io::Result<()> {
             )?;
         }
         Detail::FinallyExit(item) => writeln!(out, ": {}", safe(item.message))?,
+        Detail::EmptyHandler(item) => writeln!(
+            out,
+            ": {} ({}, {})",
+            safe(item.message),
+            safe(item.cause),
+            safe(item.body_shape)
+        )?,
     }
     Ok(())
 }

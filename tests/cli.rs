@@ -363,6 +363,124 @@ fn compare_finally_exits_under_base_policy() {
 }
 
 #[test]
+fn empty_handler_contract_and_waivers() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let tools = common::without_python();
+    fs::write(
+        dir.join(".lint-action.json"),
+        r#"{"mode":"strict","limits":{},"empty_handler":true}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("file.py"),
+        r#"try: run()
+except: pass
+try: run()
+except Exception: ...
+try: run()
+except FileNotFoundError: pass
+try: run()
+except Exception: raise
+try: run()
+except Exception: retry()
+try: run()
+except* Exception: pass
+try: run()
+except Exception:
+    # lint-gate: allow empty-handler -- expected absence
+    pass
+try: run()
+except Exception:
+    # lint-gate: allow empty-handler --
+    pass
+# lint-gate: allow empty-handler -- outside
+try: run()
+except Exception: pass
+try: run()
+except Exception:
+# lint-gate: allow empty-handler -- outside suite
+    pass
+try: run()
+except Exception as error: pass
+"#,
+    )
+    .unwrap();
+    fs::write(dir.join("file.ts"), r#"try { run() } catch (e) {} try { run() } catch (e) { /* lint-gate: allow empty-handler -- expected */ }
+try { run() } catch (e) { // lint-gate: allow empty-handler --
+}
+// lint-gate: allow empty-handler -- outside
+try { run() } catch (e) { /* harmless */ }
+try { run() } catch (e) { throw e }
+try { run() } catch (e) { const x = "lint-gate: allow empty-handler -- reason"; }
+"#).unwrap();
+    fs::write(dir.join("file.tsx"), "try { run() } catch (e) {}\n").unwrap();
+    let run = || {
+        common::command(&tools)
+            .current_dir(dir)
+            .arg("scan")
+            .output()
+            .unwrap()
+    };
+    let output = run();
+    assert_eq!(output.status.code(), Some(0));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let findings = report["findings"].as_array().unwrap();
+    assert_eq!(findings.len(), 10, "{findings:#?}");
+    assert!(findings.iter().all(|f| f["rule"] == "empty-handler"
+        && f["severity"] == "warn"
+        && f["status"] == "reported"
+        && f.get("score").is_none()));
+    assert_eq!(findings[0]["cause"], "bare except");
+    assert_eq!(findings[0]["body_shape"], "pass");
+    assert_eq!(findings[1]["body_shape"], "ellipsis");
+    assert_eq!(findings[0]["range"]["start"], json!({"line":2,"column":1}));
+    let mut policy = json!({"mode":"strict","limits":{},"empty_handler":true,"severities":{"empty-handler":"error"}});
+    fs::write(dir.join(".lint-action.json"), policy.to_string()).unwrap();
+    assert_eq!(run().status.code(), Some(1));
+    policy["empty_handler"] = json!(false);
+    policy["limits"] = json!({"python":12});
+    fs::write(dir.join(".lint-action.json"), policy.to_string()).unwrap();
+    let report: Value = serde_json::from_slice(&run().stdout).unwrap();
+    assert_eq!(report["format_version"], 2);
+    assert_eq!(report["findings"], json!([]));
+}
+
+#[test]
+fn compare_empty_handlers_under_base_policy() {
+    let base = tempfile::tempdir().unwrap();
+    let candidate = tempfile::tempdir().unwrap();
+    let tools = common::without_python();
+    fs::write(base.path().join(".lint-action.json"), r#"{"mode":"strict","limits":{},"empty_handler":true,"severities":{"empty-handler":"error"}}"#).unwrap();
+    let unsafe_source = "try: run()\nexcept Exception: pass\n";
+    let safe_source = "try: run()\nexcept Exception: raise\n";
+    for (file, before, after) in [
+        ("new.py", safe_source, unsafe_source),
+        ("removed.py", unsafe_source, safe_source),
+        ("same.py", unsafe_source, unsafe_source),
+    ] {
+        fs::write(base.path().join(file), before).unwrap();
+        fs::write(candidate.path().join(file), after).unwrap();
+    }
+    let output = common::command(&tools)
+        .args(["compare", "--root"])
+        .arg(candidate.path())
+        .arg("--base-root")
+        .arg(base.path())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let c = &report["comparison"];
+    assert_eq!(c["format_version"], 2);
+    assert_eq!(c["unchanged"], 1);
+    assert_eq!(c["changes"].as_array().unwrap().len(), 2);
+    assert_eq!(c["changes"][0]["category"], "new");
+    assert_eq!(c["changes"][0]["current"]["cause"], "except Exception");
+    assert_eq!(c["changes"][1]["category"], "removed");
+}
+
+#[test]
 fn scan_text_and_json_formats_follow_the_gate() {
     let tools = common::without_python();
     let tree = tempfile::tempdir().unwrap();
